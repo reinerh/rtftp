@@ -1,9 +1,13 @@
 use std::net::{SocketAddr,UdpSocket};
 use std::fs::File;
 use std::path::Path;
+use std::error::Error;
 use std::env;
 use std::io;
 use std::io::prelude::*;
+
+extern crate nix;
+use nix::unistd::{Gid,Uid,setresgid,setresuid};
 
 fn handle_wrq(_cl: &SocketAddr, _buf: &[u8]) -> Result<(), io::Error> {
     Ok(())
@@ -175,12 +179,48 @@ fn handle_client(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
     Ok(())
 }
 
+fn drop_privs() -> Result<(), Box<Error>> {
+    let root_uid = Uid::from_raw(0);
+    let root_gid = Gid::from_raw(0);
+    let unpriv_uid = Uid::from_raw(65534);
+    let unpriv_gid = Gid::from_raw(65534);
+
+    if Gid::current() == root_gid || Gid::effective() == root_gid {
+        setresgid(unpriv_gid, unpriv_gid, unpriv_gid)?;
+    }
+
+    if Uid::current() == root_uid || Uid::effective() == root_uid {
+        setresuid(unpriv_uid, unpriv_uid, unpriv_uid)?;
+    }
+
+    Ok(())
+}
+
 fn main() {
-    let socket = UdpSocket::bind("127.0.0.1:12345").expect("Binding a socket failed.");
+    let socket = match UdpSocket::bind("0.0.0.0:69") {
+        Ok(s) => s,
+        Err(err) => {
+            println!("Binding a socket failed: {}", err);
+            return;
+        }
+    };
+    match drop_privs() {
+        Ok(_) => (),
+        Err(err) => {
+            println!("Dropping privileges failed: {}", err);
+            return;
+        }
+    };
 
     loop {
         let mut buf = [0; 2048];
-        let (n, src) = socket.recv_from(&mut buf).expect("Receiving from the socket failed.");
+        let (n, src) = match socket.recv_from(&mut buf) {
+            Ok(args) => args,
+            Err(err) => {
+                println!("Receiving data from socket failed: {}", err);
+                break;
+            }
+        };
 
         match handle_client(&src, &buf[0..n]) {
             /* errors intentionally ignored */
