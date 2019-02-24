@@ -1,6 +1,6 @@
 use std::net::{SocketAddr,UdpSocket};
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path,PathBuf};
 use std::error::Error;
 use std::env;
 use std::io;
@@ -43,8 +43,8 @@ fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error
     Ok(false)
 }
 
-fn send_file(cl: &SocketAddr, filename: &str) -> Result<(), io::Error> {
-    let file = File::open(filename);
+fn send_file(cl: &SocketAddr, path: &Path) -> Result<(), io::Error> {
+    let file = File::open(path);
     let mut file = match file {
         Ok(f) => f,
         Err(ref error) if error.kind() == io::ErrorKind::NotFound => {
@@ -104,23 +104,21 @@ fn send_file(cl: &SocketAddr, filename: &str) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn file_allowed(filename: &str) -> bool {
-    let path = Path::new(".").join(&filename);
-    let path = match path.parent() {
-        Some(p) => p,
-        None => return false,
-    };
-    let path = match path.canonicalize() {
+fn file_allowed(filename: &Path) -> Option<PathBuf> {
+    let path = match filename.canonicalize() {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return None,
     };
 
     let cwd = match env::current_dir() {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => return None,
     };
 
-    return path.starts_with(cwd);
+    match path.strip_prefix(cwd) {
+        Ok(p) => Some(p.to_path_buf()),
+        Err(_) => return None,
+    }
 }
 
 fn handle_rrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
@@ -128,28 +126,25 @@ fn handle_rrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
 
     let dataerr = io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
 
-    let fname_len = iter.position(|&x| x == 0);
-    let fname_len = match fname_len {
+    let fname_len = match iter.position(|&x| x == 0) {
         Some(len) => len,
         None => return Err(dataerr),
     };
     let fname_begin = 0;
     let fname_end = fname_begin + fname_len;
-    let filename = String::from_utf8(buf[fname_begin .. fname_end].to_vec());
-    let filename = match filename {
+    let filename = match String::from_utf8(buf[fname_begin .. fname_end].to_vec()) {
         Ok(fname) => fname,
         Err(_) => return Err(dataerr),
     };
+    let filename = Path::new(&filename);
 
-    let mode_len = iter.position(|&x| x == 0);
-    let mode_len = match mode_len {
+    let mode_len = match iter.position(|&x| x == 0) {
         Some(len) => len,
         None => return Err(dataerr),
     };
     let mode_begin = fname_end + 1;
     let mode_end = mode_begin + mode_len;
-    let mode = String::from_utf8(buf[mode_begin .. mode_end].to_vec());
-    let mode = match mode {
+    let mode = match String::from_utf8(buf[mode_begin .. mode_end].to_vec()) {
         Ok(m) => m.to_lowercase(),
         Err(_) => return Err(dataerr),
     };
@@ -159,17 +154,18 @@ fn handle_rrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         _ => handle_error(cl, 0, "Unsupported mode")?,
     }
 
-    match file_allowed(&filename) {
-        true => (),
-        false => {
+    let path = match file_allowed(&filename) {
+        Some(path) => path,
+        None => {
+            println!("Sending {} to {} failed.", filename.display(), cl);
             handle_error(cl, 2, "Permission denied")?;
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
         }
-    }
+    };
 
-    match send_file(&cl, &filename) {
-        Ok(_) => println!("Sent {} to {}.", filename, cl),
-        Err(_) => println!("Sending {} to {} failed.", filename, cl),
+    match send_file(&cl, &path) {
+        Ok(_) => println!("Sent {} to {}.", path.display(), cl),
+        Err(_) => println!("Sending {} to {} failed.", path.display(), cl),
     }
     Ok(())
 }
@@ -238,6 +234,7 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
     };
     let mut opts = Options::new();
     opts.optflag("h", "help", "display usage information");
+    opts.optopt("d", "directory", "directory to serve (default: current directory)", "DIRECTORY");
     opts.optopt("p", "port", format!("port to listen on (default: {})", conf.port).as_ref(), "PORT");
     opts.optopt("u", "uid", format!("user id to run as (default: {})", conf.uid).as_ref(), "UID");
     opts.optopt("g", "gid", format!("group id to run as (default: {})", conf.gid).as_ref(), "GID");
@@ -274,6 +271,22 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
             return Err("gid");
         }
     };
+    if matches.opt_present("d") {
+        let basedir = match matches.opt_str("d") {
+            Some(d) => d,
+            None => {
+                usage(opts, None);
+                return Err("directory");
+            }
+        };
+        match env::set_current_dir(Path::new(&basedir)) {
+            Ok(_) => (),
+            Err(err) => {
+                usage(opts, Some(err.to_string()));
+                return Err("changing directory");
+            }
+        }
+    }
 
     return Ok(conf);
 }
