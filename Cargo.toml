@@ -5,3 +5,7 @@ authors = ["Reiner Herrmann <reiner@reiner-h.de>"]
 edition = "2018"
 
 [dependencies]
+
+[[bin]]
+name = "rtftpd"
+path = "src/tftpd.rs"
