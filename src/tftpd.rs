@@ -10,6 +10,15 @@ use std::time::Duration;
 extern crate nix;
 use nix::unistd::{Gid,Uid,setresgid,setresuid};
 
+extern crate getopts;
+use getopts::Options;
+
+struct Configuration {
+    port: u16,
+    uid: u32,
+    gid: u32,
+}
+
 fn handle_wrq(_cl: &SocketAddr, _buf: &[u8]) -> Result<(), io::Error> {
     Ok(())
 }
@@ -189,11 +198,17 @@ fn handle_client(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn drop_privs() -> Result<(), Box<Error>> {
+fn drop_privs(uid: u32, gid: u32) -> Result<(), Box<Error>> {
     let root_uid = Uid::from_raw(0);
     let root_gid = Gid::from_raw(0);
-    let unpriv_uid = Uid::from_raw(65534);
-    let unpriv_gid = Gid::from_raw(65534);
+    let unpriv_uid = Uid::from_raw(uid);
+    let unpriv_gid = Gid::from_raw(gid);
+
+    if Gid::current() != root_gid && Gid::effective() != root_gid
+        && Uid::current() != root_uid && Uid::effective() != root_uid {
+        /* already unprivileged user */
+        return Ok(());
+    }
 
     if Gid::current() == root_gid || Gid::effective() == root_gid {
         setresgid(unpriv_gid, unpriv_gid, unpriv_gid)?;
@@ -206,15 +221,79 @@ fn drop_privs() -> Result<(), Box<Error>> {
     Ok(())
 }
 
+fn usage(opts: Options, error: Option<String>) {
+    match error {
+        None => {},
+        Some(err) => println!("{}\n", err),
+    }
+    println!("{}", opts.usage("RusTFTP"));
+
+}
+
+fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str> {
+    let mut conf = Configuration{
+        port: 69,
+        uid: 65534,
+        gid: 65534,
+    };
+    let mut opts = Options::new();
+    opts.optflag("h", "help", "display usage information");
+    opts.optopt("p", "port", format!("port to listen on (default: {})", conf.port).as_ref(), "PORT");
+    opts.optopt("u", "uid", format!("user id to run as (default: {})", conf.uid).as_ref(), "UID");
+    opts.optopt("g", "gid", format!("group id to run as (default: {})", conf.gid).as_ref(), "GID");
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(err) => {
+            usage(opts, Some(err.to_string()));
+            return Err("Parsing error");
+        }
+    };
+    if matches.opt_present("h") {
+        usage(opts, None);
+        return Err("usage");
+    }
+
+    conf.port = match matches.opt_get_default::<u16>("p", conf.port) {
+        Ok(p) => p,
+        Err(err) => {
+            usage(opts, Some(err.to_string()));
+            return Err("port");
+        }
+    };
+    conf.uid = match matches.opt_get_default::<u32>("u", conf.uid) {
+        Ok(u) => u,
+        Err(err) => {
+            usage(opts, Some(err.to_string()));
+            return Err("uid");
+        }
+    };
+    conf.gid = match matches.opt_get_default::<u32>("g", conf.gid) {
+        Ok(g) => g,
+        Err(err) => {
+            usage(opts, Some(err.to_string()));
+            return Err("gid");
+        }
+    };
+
+    return Ok(conf);
+}
+
 fn main() {
-    let socket = match UdpSocket::bind("0.0.0.0:69") {
+    let args: Vec<String> = env::args().collect();
+
+    let conf = match parse_commandline(&args) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let socket = match UdpSocket::bind(format!("0.0.0.0:{}", conf.port)) {
         Ok(s) => s,
         Err(err) => {
             println!("Binding a socket failed: {}", err);
             return;
         }
     };
-    match drop_privs() {
+    match drop_privs(conf.uid, conf.gid) {
         Ok(_) => (),
         Err(err) => {
             println!("Dropping privileges failed: {}", err);

@@ -7,6 +7,7 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 nix = "0.13.0"
+getopts = "0.2.18"
 
 [[bin]]
 name = "rtftpd"
