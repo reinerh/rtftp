@@ -5,6 +5,7 @@ use std::error::Error;
 use std::env;
 use std::io;
 use std::io::prelude::*;
+use std::time::Duration;
 
 extern crate nix;
 use nix::unistd::{Gid,Uid,setresgid,setresuid};
@@ -15,7 +16,13 @@ fn handle_wrq(_cl: &SocketAddr, _buf: &[u8]) -> Result<(), io::Error> {
 
 fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
     let mut buf = [0; 4];
-    sock.recv(&mut buf)?;
+    match sock.recv(&mut buf) {
+        Ok(_) => (),
+        Err(ref error) if [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut].contains(&error.kind()) => {
+            return Ok(false);
+        }
+        Err(err) => return Err(err),
+    };
 
     let opcode = u16::from_be_bytes([buf[0], buf[1]]);
     let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
@@ -47,6 +54,7 @@ fn send_file(cl: &SocketAddr, filename: &str) -> Result<(), io::Error> {
 
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     socket.connect(cl)?;
+    socket.set_read_timeout(Some(Duration::from_secs(3)))?;
     let mut block_nr: u16 = 1;
 
     loop {
@@ -65,8 +73,10 @@ fn send_file(cl: &SocketAddr, filename: &str) -> Result<(), io::Error> {
         sendbuf.extend(block_nr.to_be_bytes().iter());
         sendbuf.extend(filebuf[0..len].iter());
 
-        socket.send(&sendbuf)?;
         for _ in 1..5 {
+            /* try a couple of times to send data, in case of timeouts
+               or re-ack of previous data */
+            socket.send(&sendbuf)?;
             match wait_for_ack(&socket, block_nr) {
                 Ok(true) => break,
                 Ok(false) => continue,
