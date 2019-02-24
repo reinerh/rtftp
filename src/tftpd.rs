@@ -1,5 +1,7 @@
 use std::net::{SocketAddr,UdpSocket};
 use std::fs::File;
+use std::path::Path;
+use std::env;
 use std::io;
 use std::io::prelude::*;
 
@@ -34,6 +36,10 @@ fn send_file(cl: &SocketAddr, filename: &str) -> Result<(), io::Error> {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
         }
     };
+    if !file.metadata()?.is_file() {
+        handle_error(cl, 1, "File not found")?;
+        return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
+    }
 
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     socket.connect(cl)?;
@@ -75,9 +81,23 @@ fn send_file(cl: &SocketAddr, filename: &str) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn file_allowed(_filename: &str) -> bool {
-    // TODO
-    true
+fn file_allowed(filename: &str) -> bool {
+    let path = Path::new(".").join(&filename);
+    let path = match path.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    let path = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let cwd = match env::current_dir() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    return path.starts_with(cwd);
 }
 
 fn handle_rrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
