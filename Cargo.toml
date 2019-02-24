@@ -1,0 +1,7 @@
+[package]
+name = "rtftp"
+version = "0.1.0"
+authors = ["Reiner Herrmann <reiner@reiner-h.de>"]
+edition = "2018"
+
+[dependencies]
