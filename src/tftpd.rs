@@ -70,26 +70,23 @@ fn parse_file_mode(buf: &[u8]) -> Result<(PathBuf, String), io::Error> {
     Ok((filename.to_path_buf(), mode))
 }
 
-fn send_file(cl: &SocketAddr, path: &Path) -> Result<(), io::Error> {
+fn send_file(socket: &UdpSocket, path: &Path) -> Result<(), io::Error> {
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(ref error) if error.kind() == io::ErrorKind::NotFound => {
-            send_error(cl, 1, "File not found")?;
+            send_error(&socket, 1, "File not found")?;
             return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
         },
         Err(_) => {
-            send_error(cl, 2, "Permission denied")?;
+            send_error(&socket, 2, "Permission denied")?;
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
         }
     };
     if !file.metadata()?.is_file() {
-        send_error(cl, 1, "File not found")?;
+        send_error(&socket, 1, "File not found")?;
         return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
     }
 
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect(cl)?;
-    socket.set_read_timeout(Some(Duration::from_secs(3)))?;
     let mut block_nr: u16 = 1;
 
     loop {
@@ -99,7 +96,7 @@ fn send_file(cl: &SocketAddr, path: &Path) -> Result<(), io::Error> {
             Ok(n) => n,
             Err(ref error) if error.kind() == io::ErrorKind::Interrupted => continue, /* retry */
             Err(err) => {
-                send_error(cl, 0, "File reading error")?;
+                send_error(&socket, 0, "File reading error")?;
                 return Err(err);
             }
         };
@@ -214,13 +211,14 @@ fn file_allowed(filename: &Path) -> Option<PathBuf> {
     }
 }
 
-fn handle_wrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+
     let (filename, mode) = parse_file_mode(buf)?;
 
     match mode.as_ref() {
         "octet" => (),
         _ => {
-            send_error(cl, 0, "Unsupported mode")?;
+            send_error(&socket, 0, "Unsupported mode")?;
             return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
         }
     }
@@ -229,20 +227,16 @@ fn handle_wrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         Some(p) => p,
         None => {
             println!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
-            send_error(cl, 2, "Permission denied")?;
+            send_error(&socket, 2, "Permission denied")?;
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
         }
     };
-
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect(cl)?;
-    socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
     match recv_file(&socket, &path) {
         Ok(_) => println!("Received {} from {}.", path.display(), cl),
         Err(err) => {
             println!("Receiving {} from {} failed ({}).", path.display(), cl, err.to_string());
-            send_error(cl, 0, "Receiving error")?;
+            send_error(&socket, 0, "Receiving error")?;
             return Ok(())
         }
     }
@@ -251,13 +245,13 @@ fn handle_wrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
 }
 
 
-fn handle_rrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+fn handle_rrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
     let (filename, mode) = parse_file_mode(buf)?;
 
     match mode.as_ref() {
         "octet" => (),
         _ => {
-            send_error(cl, 0, "Unsupported mode")?;
+            send_error(&socket, 0, "Unsupported mode")?;
             return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
         }
     }
@@ -266,22 +260,19 @@ fn handle_rrq(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         Some(p) => p,
         None => {
             println!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
-            send_error(cl, 2, "Permission denied")?;
+            send_error(&socket, 2, "Permission denied")?;
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
         }
     };
 
-    match send_file(&cl, &path) {
+    match send_file(&socket, &path) {
         Ok(_) => println!("Sent {} to {}.", path.display(), cl),
         Err(err) => println!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string()),
     }
     Ok(())
 }
 
-fn send_error(cl: &SocketAddr, code: u16, msg: &str) -> Result<(), io::Error> {
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect(cl)?;
-
+fn send_error(socket: &UdpSocket, code: u16, msg: &str) -> Result<(), io::Error> {
     let mut buf = vec![0x00, 0x05];  // opcode
     buf.extend(code.to_be_bytes().iter());
     buf.extend(msg.as_bytes());
@@ -300,12 +291,16 @@ fn send_ack(sock: &UdpSocket, block_nr: u16) -> Result<(), io::Error> {
 }
 
 fn handle_client(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    socket.connect(cl)?;
+    socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+
     let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
-        1 /* RRQ */ => handle_rrq(&cl, &buf[2..])?,
-        2 /* WRQ */ => handle_wrq(&cl, &buf[2..])?,
+        1 /* RRQ */ => handle_rrq(&socket, &cl, &buf[2..])?,
+        2 /* WRQ */ => handle_wrq(&socket, &cl, &buf[2..])?,
         5 /* ERROR */ => println!("Received ERROR from {}", cl),
         _ => {
-            send_error(cl, 4, "Unexpected opcode")?;
+            send_error(&socket, 4, "Unexpected opcode")?;
             return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode"));
         }
     };
