@@ -17,6 +17,8 @@ struct Configuration {
     port: u16,
     uid: u32,
     gid: u32,
+    ro: bool,
+    wo: bool,
 }
 
 fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
@@ -290,14 +292,28 @@ fn send_ack(sock: &UdpSocket, block_nr: u16) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn handle_client(cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+fn handle_client(conf: &Configuration, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     socket.connect(cl)?;
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
     let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
-        1 /* RRQ */ => handle_rrq(&socket, &cl, &buf[2..])?,
-        2 /* WRQ */ => handle_wrq(&socket, &cl, &buf[2..])?,
+        1 /* RRQ */ => {
+            if conf.wo {
+                send_error(&socket, 4, "reading not allowed")?;
+                return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
+            } else {
+                handle_rrq(&socket, &cl, &buf[2..])?;
+            }
+        },
+        2 /* WRQ */ => {
+            if conf.ro {
+                send_error(&socket, 4, "writing not allowed")?;
+                return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
+            } else {
+                handle_wrq(&socket, &cl, &buf[2..])?;
+            }
+        },
         5 /* ERROR */ => println!("Received ERROR from {}", cl),
         _ => {
             send_error(&socket, 4, "Unexpected opcode")?;
@@ -344,6 +360,8 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
         port: 69,
         uid: 65534,
         gid: 65534,
+        ro: false,
+        wo: false,
     };
     let mut opts = Options::new();
     opts.optflag("h", "help", "display usage information");
@@ -351,6 +369,8 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
     opts.optopt("p", "port", format!("port to listen on (default: {})", conf.port).as_ref(), "PORT");
     opts.optopt("u", "uid", format!("user id to run as (default: {})", conf.uid).as_ref(), "UID");
     opts.optopt("g", "gid", format!("group id to run as (default: {})", conf.gid).as_ref(), "GID");
+    opts.optflag("r", "read-only", "allow only reading/downloading of files (RRQ)");
+    opts.optflag("w", "write-only", "allow only writing/uploading of files (WRQ)");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(err) => {
@@ -384,6 +404,12 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
             return Err("gid");
         }
     };
+    conf.ro = matches.opt_present("r");
+    conf.wo = matches.opt_present("w");
+    if conf.ro && conf.wo {
+        usage(opts, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
+        return Err("ro and wo");
+    }
     if matches.opt_present("d") {
         let basedir = match matches.opt_str("d") {
             Some(d) => d,
@@ -437,7 +463,7 @@ fn main() {
             }
         };
 
-        match handle_client(&src, &buf[0..n]) {
+        match handle_client(&conf, &src, &buf[0..n]) {
             /* errors intentionally ignored */
             _ => (),
         }
