@@ -1,3 +1,7 @@
+/*
+ * Copyright 2019 Reiner Herrmann <reiner@reiner-h.de>
+ * License: GPL-3+
+ */
 use std::net::{SocketAddr,UdpSocket};
 use std::fs::OpenOptions;
 use std::fs::File;
