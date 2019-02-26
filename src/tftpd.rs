@@ -24,6 +24,7 @@ struct Configuration {
     gid: u32,
     ro: bool,
     wo: bool,
+    dir: PathBuf,
 }
 
 fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
@@ -223,7 +224,6 @@ fn file_allowed(filename: &Path) -> Option<PathBuf> {
 }
 
 fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-
     let (filename, mode) = parse_file_mode(buf)?;
 
     match mode.as_ref() {
@@ -374,6 +374,7 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
         gid: 65534,
         ro: false,
         wo: false,
+        dir: env::current_dir().expect("Can't get current directory"),
     };
     let mut opts = Options::new();
     opts.optflag("h", "help", "display usage information");
@@ -423,20 +424,13 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
         return Err("ro and wo");
     }
     if matches.opt_present("d") {
-        let basedir = match matches.opt_str("d") {
-            Some(d) => d,
+        conf.dir = match matches.opt_str("d") {
+            Some(d) => Path::new(&d).to_path_buf(),
             None => {
                 usage(opts, None);
                 return Err("directory");
             }
         };
-        match env::set_current_dir(Path::new(&basedir)) {
-            Ok(_) => (),
-            Err(err) => {
-                usage(opts, Some(err.to_string()));
-                return Err("changing directory");
-            }
-        }
     }
 
     return Ok(conf);
@@ -464,6 +458,14 @@ fn main() {
             return;
         }
     };
+
+    match env::set_current_dir(&conf.dir) {
+        Ok(_) => (),
+        Err(err) => {
+            println!("Changing directory to {} failed ({}).", &conf.dir.display(), err);
+            return;
+        }
+    }
 
     loop {
         let mut buf = [0; 2048];
