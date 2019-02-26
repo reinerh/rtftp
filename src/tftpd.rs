@@ -151,6 +151,7 @@ fn recv_file(sock: &UdpSocket, path: &PathBuf) -> Result<(), io::Error> {
                 }
                 Err(err) => return Err(err),
             };
+            break;
         }
         if len > 516 || len < 4 {
             /* max size: 2 + 2 + 512 */
