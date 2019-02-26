@@ -1,4 +1,5 @@
 use std::net::{SocketAddr,UdpSocket};
+use std::fs::OpenOptions;
 use std::fs::File;
 use std::path::{Path,PathBuf};
 use std::error::Error;
@@ -130,8 +131,11 @@ fn send_file(socket: &UdpSocket, path: &Path) -> Result<(), io::Error> {
 }
 
 fn recv_file(sock: &UdpSocket, path: &PathBuf) -> Result<(), io::Error> {
-    let mut file = match File::create(path) {
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(f) => f,
+        Err(ref err) if err.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(io::Error::new(err.kind(), "already exists"));
+        },
         Err(_) => return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied")),
     };
 
@@ -237,13 +241,16 @@ fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io:
 
     match recv_file(&socket, &path) {
         Ok(_) => println!("Received {} from {}.", path.display(), cl),
-        Err(err) => {
+        Err(ref err) => {
             println!("Receiving {} from {} failed ({}).", path.display(), cl, err.to_string());
-            send_error(&socket, 0, "Receiving error")?;
-            return Ok(())
+            match err.kind() {
+                io::ErrorKind::PermissionDenied => send_error(&socket, 2, "Permission denied")?,
+                io::ErrorKind::AlreadyExists => send_error(&socket, 6, "File already exists")?,
+                _ => send_error(&socket, 0, "Receiving error")?,
+            }
+            return Err(io::Error::new(err.kind(), err.to_string()));
         }
     }
-
     Ok(())
 }
 
