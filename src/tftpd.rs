@@ -28,6 +28,10 @@ struct Configuration {
     dir: PathBuf,
 }
 
+struct TftpOptions {
+
+}
+
 fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
     let mut buf = [0; 4];
     match sock.recv(&mut buf) {
@@ -46,6 +50,53 @@ fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error
     }
 
     Ok(false)
+}
+
+fn ack_options(sock: &UdpSocket, options: &HashMap<String, String>, waitack: bool) -> Result<(), io::Error> {
+    if options.is_empty() {
+        return Ok(())
+    }
+
+    let mut buf = Vec::with_capacity(512);
+    buf.extend([0x00, 0x06].iter());  // opcode
+
+    for (key, val) in options {
+        buf.extend(key.bytes());
+        buf.push(0x00);
+        buf.extend(val.bytes());
+        buf.push(0x00);
+    }
+
+    for _ in 1..5 {
+        sock.send(&buf)?;
+        if !waitack {
+            return Ok(());
+        }
+        match wait_for_ack(&sock, 0) {
+            Ok(true) => return Ok(()),
+            Ok(false) => continue,
+            Err(e) => return Err(e),
+        };
+    }
+
+    Err(io::Error::new(io::ErrorKind::TimedOut, "ack timeout"))
+}
+
+fn init_tftp_options(sock: &UdpSocket, options: &mut HashMap<String, String>, waitack: bool) -> Result<TftpOptions, io::Error> {
+    let tftpopts = TftpOptions {};
+
+    options.retain(|key, _val| {
+        match key.as_str() {
+            "placeholder_option" => {
+                true
+            }
+            _ => false
+        }
+    });
+
+    ack_options(&sock, &options, waitack)?;
+
+    return Ok(tftpopts);
 }
 
 fn get_tftp_str(buf: &[u8]) -> Option<(String, usize)> {
@@ -130,8 +181,7 @@ fn send_file(socket: &UdpSocket, path: &Path) -> Result<(), io::Error> {
 
     loop {
         let mut filebuf = [0; 512];
-        let len = file.read(&mut filebuf);
-        let len = match len {
+        let len = match file.read(&mut filebuf) {
             Ok(n) => n,
             Err(ref error) if error.kind() == io::ErrorKind::Interrupted => continue, /* retry */
             Err(err) => {
@@ -140,7 +190,8 @@ fn send_file(socket: &UdpSocket, path: &Path) -> Result<(), io::Error> {
             }
         };
 
-        let mut sendbuf = vec![0x00, 0x03];  // opcode
+        let mut sendbuf = Vec::with_capacity(4 + len);
+        sendbuf.extend([0x00, 0x03].iter());  // opcode
         sendbuf.extend(block_nr.to_be_bytes().iter());
         sendbuf.extend(filebuf[0..len].iter());
 
@@ -255,7 +306,8 @@ fn file_allowed(filename: &Path) -> Option<PathBuf> {
 }
 
 fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-    let (filename, mode, _options) = parse_file_mode_options(buf)?;
+    let (filename, mode, mut options) = parse_file_mode_options(buf)?;
+    let _opts = init_tftp_options(&socket, &mut options, false);
 
     match mode.as_ref() {
         "octet" => (),
@@ -291,7 +343,8 @@ fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io:
 
 
 fn handle_rrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-    let (filename, mode, _options) = parse_file_mode_options(buf)?;
+    let (filename, mode, mut options) = parse_file_mode_options(buf)?;
+    let _opts = init_tftp_options(&socket, &mut options, true);
 
     match mode.as_ref() {
         "octet" => (),
