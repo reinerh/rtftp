@@ -7,6 +7,7 @@ use std::fs::OpenOptions;
 use std::fs::File;
 use std::path::{Path,PathBuf};
 use std::error::Error;
+use std::collections::HashMap;
 use std::env;
 use std::io;
 use std::io::prelude::*;
@@ -47,35 +48,65 @@ fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error
     Ok(false)
 }
 
-fn parse_file_mode(buf: &[u8]) -> Result<(PathBuf, String), io::Error> {
+fn get_tftp_str(buf: &[u8]) -> Option<(String, usize)> {
     let mut iter = buf.iter();
 
+    let len = match iter.position(|&x| x == 0) {
+        Some(l) => l,
+        None => return None,
+    };
+    let val = match String::from_utf8(buf[0 .. len].to_vec()) {
+        Ok(v) => v,
+        Err(_) => return None,
+    };
+
+    return Some((val, len));
+}
+
+fn parse_options(buf: &[u8]) -> HashMap<String, String> {
+    let mut options = HashMap::new();
+
+    let mut pos = 0;
+    loop {
+        let (key, len) = match get_tftp_str(&buf[pos ..]) {
+            Some(args) => args,
+            None => break,
+        };
+        pos += len + 1;
+
+        let (val, len) = match get_tftp_str(&buf[pos ..]) {
+            Some(args) => args,
+            None => break,
+        };
+        pos += len + 1;
+
+        options.insert(key, val);
+    }
+
+    return options;
+}
+
+fn parse_file_mode_options(buf: &[u8]) -> Result<(PathBuf, String, HashMap<String, String>), io::Error> {
     let dataerr = io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
 
-    let fname_len = match iter.position(|&x| x == 0) {
-        Some(len) => len,
+    let mut pos = 0;
+    let (filename, len) = match get_tftp_str(&buf[pos ..]) {
+        Some(args) => args,
         None => return Err(dataerr),
     };
-    let fname_begin = 0;
-    let fname_end = fname_begin + fname_len;
-    let filename = match String::from_utf8(buf[fname_begin .. fname_end].to_vec()) {
-        Ok(fname) => fname,
-        Err(_) => return Err(dataerr),
-    };
+    pos += len + 1;
+
     let filename = Path::new(&filename);
 
-    let mode_len = match iter.position(|&x| x == 0) {
-        Some(len) => len,
+    let (mode, len) = match get_tftp_str(&buf[pos ..]) {
+        Some(args) => args,
         None => return Err(dataerr),
     };
-    let mode_begin = fname_end + 1;
-    let mode_end = mode_begin + mode_len;
-    let mode = match String::from_utf8(buf[mode_begin .. mode_end].to_vec()) {
-        Ok(m) => m.to_lowercase(),
-        Err(_) => return Err(dataerr),
-    };
+    pos += len + 1;
 
-    Ok((filename.to_path_buf(), mode))
+    let options = parse_options(&buf[pos ..]);
+
+    Ok((filename.to_path_buf(), mode, options))
 }
 
 fn send_file(socket: &UdpSocket, path: &Path) -> Result<(), io::Error> {
@@ -224,7 +255,7 @@ fn file_allowed(filename: &Path) -> Option<PathBuf> {
 }
 
 fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-    let (filename, mode) = parse_file_mode(buf)?;
+    let (filename, mode, _options) = parse_file_mode_options(buf)?;
 
     match mode.as_ref() {
         "octet" => (),
@@ -260,7 +291,7 @@ fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io:
 
 
 fn handle_rrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-    let (filename, mode) = parse_file_mode(buf)?;
+    let (filename, mode, _options) = parse_file_mode_options(buf)?;
 
     match mode.as_ref() {
         "octet" => (),
