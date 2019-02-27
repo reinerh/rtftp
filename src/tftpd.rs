@@ -136,7 +136,7 @@ impl Tftpd {
     }
 
     pub fn handle_client(&mut self, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        let socket = UdpSocket::bind("[::]:0")?;
         socket.connect(cl)?;
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
@@ -190,7 +190,7 @@ impl Tftpd {
     }
 
     pub fn start(&mut self) {
-        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", self.conf.port)) {
+        let socket = match UdpSocket::bind(format!("[::]:{}", self.conf.port)) {
             Ok(s) => s,
             Err(err) => {
                 println!("Binding a socket failed: {}", err);
