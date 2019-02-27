@@ -2,15 +2,12 @@
  * Copyright 2019 Reiner Herrmann <reiner@reiner-h.de>
  * License: GPL-3+
  */
+
 use std::net::{SocketAddr,UdpSocket};
-use std::fs::OpenOptions;
-use std::fs::File;
 use std::path::{Path,PathBuf};
 use std::error::Error;
-use std::collections::HashMap;
 use std::env;
 use std::io;
-use std::io::prelude::*;
 use std::time::Duration;
 
 extern crate nix;
@@ -19,427 +16,220 @@ use nix::unistd::{Gid,Uid,setresgid,setresuid};
 extern crate getopts;
 use getopts::Options;
 
+mod tftp;
+
 struct Configuration {
-    port: u16,
-    uid: u32,
-    gid: u32,
-    ro: bool,
-    wo: bool,
-    dir: PathBuf,
+    pub port: u16,
+    pub uid: u32,
+    pub gid: u32,
+    pub ro: bool,
+    pub wo: bool,
+    pub dir: PathBuf,
 }
 
-struct TftpOptions {
-
+struct Tftpd {
+    tftp: tftp::Tftp,
+    conf: Configuration,
 }
 
-fn wait_for_ack(sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
-    let mut buf = [0; 4];
-    match sock.recv(&mut buf) {
-        Ok(_) => (),
-        Err(ref error) if [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut].contains(&error.kind()) => {
-            return Ok(false);
+impl Tftpd {
+    pub fn new(conf: Configuration) -> Tftpd {
+        Tftpd{
+            tftp: tftp::Tftp::new(),
+            conf: conf,
         }
-        Err(err) => return Err(err),
-    };
-
-    let opcode = u16::from_be_bytes([buf[0], buf[1]]);
-    let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
-
-    if opcode == 4 && block_nr == expected_block {
-        return Ok(true)
     }
 
-    Ok(false)
-}
-
-fn ack_options(sock: &UdpSocket, options: &HashMap<String, String>, waitack: bool) -> Result<(), io::Error> {
-    if options.is_empty() {
-        return Ok(())
-    }
-
-    let mut buf = Vec::with_capacity(512);
-    buf.extend([0x00, 0x06].iter());  // opcode
-
-    for (key, val) in options {
-        buf.extend(key.bytes());
-        buf.push(0x00);
-        buf.extend(val.bytes());
-        buf.push(0x00);
-    }
-
-    for _ in 1..5 {
-        sock.send(&buf)?;
-        if !waitack {
-            return Ok(());
-        }
-        match wait_for_ack(&sock, 0) {
-            Ok(true) => return Ok(()),
-            Ok(false) => continue,
-            Err(e) => return Err(e),
+    fn file_allowed(&self, filename: &Path) -> Option<PathBuf> {
+        /* get parent to check dir where file should be read/written */
+        let path = Path::new(".").join(filename);
+        let path = match path.parent() {
+            Some(p) => p,
+            None => return None,
         };
+        let path = match path.canonicalize() {
+            Ok(p) => p,
+            Err(_) => return None,
+        };
+
+        /* get last component to append to canonicalized path */
+        let filename = match filename.file_name() {
+            Some(f) => f,
+            None => return None,
+        };
+        let path = path.join(filename);
+
+        let cwd = match env::current_dir() {
+            Ok(p) => p,
+            Err(_) => return None,
+        };
+
+        match path.strip_prefix(cwd) {
+            Ok(p) => Some(p.to_path_buf()),
+            Err(_) => return None,
+        }
     }
 
-    Err(io::Error::new(io::ErrorKind::TimedOut, "ack timeout"))
-}
 
-fn init_tftp_options(sock: &UdpSocket, options: &mut HashMap<String, String>, waitack: bool) -> Result<TftpOptions, io::Error> {
-    let tftpopts = TftpOptions {};
+    fn handle_wrq(&self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+        let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
+        let _opts = self.tftp.init_tftp_options(&socket, &mut options, false);
 
-    options.retain(|key, _val| {
-        match key.as_str() {
-            "placeholder_option" => {
-                true
+        match mode.as_ref() {
+            "octet" => (),
+            _ => {
+                self.tftp.send_error(&socket, 0, "Unsupported mode")?;
+                return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
             }
-            _ => false
         }
-    });
 
-    ack_options(&sock, &options, waitack)?;
-
-    return Ok(tftpopts);
-}
-
-fn get_tftp_str(buf: &[u8]) -> Option<(String, usize)> {
-    let mut iter = buf.iter();
-
-    let len = match iter.position(|&x| x == 0) {
-        Some(l) => l,
-        None => return None,
-    };
-    let val = match String::from_utf8(buf[0 .. len].to_vec()) {
-        Ok(v) => v,
-        Err(_) => return None,
-    };
-
-    return Some((val, len));
-}
-
-fn parse_options(buf: &[u8]) -> HashMap<String, String> {
-    let mut options = HashMap::new();
-
-    let mut pos = 0;
-    loop {
-        let (key, len) = match get_tftp_str(&buf[pos ..]) {
-            Some(args) => args,
-            None => break,
-        };
-        pos += len + 1;
-
-        let (val, len) = match get_tftp_str(&buf[pos ..]) {
-            Some(args) => args,
-            None => break,
-        };
-        pos += len + 1;
-
-        options.insert(key, val);
-    }
-
-    return options;
-}
-
-fn parse_file_mode_options(buf: &[u8]) -> Result<(PathBuf, String, HashMap<String, String>), io::Error> {
-    let dataerr = io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
-
-    let mut pos = 0;
-    let (filename, len) = match get_tftp_str(&buf[pos ..]) {
-        Some(args) => args,
-        None => return Err(dataerr),
-    };
-    pos += len + 1;
-
-    let filename = Path::new(&filename);
-
-    let (mode, len) = match get_tftp_str(&buf[pos ..]) {
-        Some(args) => args,
-        None => return Err(dataerr),
-    };
-    pos += len + 1;
-
-    let options = parse_options(&buf[pos ..]);
-
-    Ok((filename.to_path_buf(), mode, options))
-}
-
-fn send_file(socket: &UdpSocket, path: &Path) -> Result<(), io::Error> {
-    let mut file = match File::open(path) {
-        Ok(f) => f,
-        Err(ref error) if error.kind() == io::ErrorKind::NotFound => {
-            send_error(&socket, 1, "File not found")?;
-            return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
-        },
-        Err(_) => {
-            send_error(&socket, 2, "Permission denied")?;
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
-        }
-    };
-    if !file.metadata()?.is_file() {
-        send_error(&socket, 1, "File not found")?;
-        return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
-    }
-
-    let mut block_nr: u16 = 1;
-
-    loop {
-        let mut filebuf = [0; 512];
-        let len = match file.read(&mut filebuf) {
-            Ok(n) => n,
-            Err(ref error) if error.kind() == io::ErrorKind::Interrupted => continue, /* retry */
-            Err(err) => {
-                send_error(&socket, 0, "File reading error")?;
-                return Err(err);
+        let path = match self.file_allowed(&filename) {
+            Some(p) => p,
+            None => {
+                println!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
+                self.tftp.send_error(&socket, 2, "Permission denied")?;
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
             }
         };
 
-        let mut sendbuf = Vec::with_capacity(4 + len);
-        sendbuf.extend([0x00, 0x03].iter());  // opcode
-        sendbuf.extend(block_nr.to_be_bytes().iter());
-        sendbuf.extend(filebuf[0..len].iter());
-
-        for _ in 1..5 {
-            /* try a couple of times to send data, in case of timeouts
-               or re-ack of previous data */
-            socket.send(&sendbuf)?;
-            match wait_for_ack(&socket, block_nr) {
-                Ok(true) => break,
-                Ok(false) => continue,
-                Err(e) => return Err(e),
-            };
-        }
-
-        if len < 512 {
-            /* this was the last block */
-            break;
-        }
-
-        /* increment with rollover on overflow */
-        block_nr = block_nr.wrapping_add(1);
-    }
-    Ok(())
-}
-
-fn recv_file(sock: &UdpSocket, path: &PathBuf) -> Result<(), io::Error> {
-    let mut file = match OpenOptions::new().write(true).create_new(true).open(path) {
-        Ok(f) => f,
-        Err(ref err) if err.kind() == io::ErrorKind::AlreadyExists => {
-            return Err(io::Error::new(err.kind(), "already exists"));
-        },
-        Err(_) => return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied")),
-    };
-
-    let mut block_nr = 0;
-
-    loop {
-        let mut buf = [0; 1024];
-        let mut len = 0;
-
-        for _ in 1..5 {
-            send_ack(&sock, block_nr)?;
-            len = match sock.recv(&mut buf) {
-                Ok(n) => n,
-                Err(ref error) if [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut].contains(&error.kind()) => {
-                    /* re-ack and try to recv again */
-                    continue;
+        match self.tftp.recv_file(&socket, &path) {
+            Ok(_) => println!("Received {} from {}.", path.display(), cl),
+            Err(ref err) => {
+                println!("Receiving {} from {} failed ({}).", path.display(), cl, err.to_string());
+                match err.kind() {
+                    io::ErrorKind::PermissionDenied => self.tftp.send_error(&socket, 2, "Permission denied")?,
+                    io::ErrorKind::AlreadyExists => self.tftp.send_error(&socket, 6, "File already exists")?,
+                    _ => self.tftp.send_error(&socket, 0, "Receiving error")?,
                 }
-                Err(err) => return Err(err),
-            };
-            break;
+                return Err(io::Error::new(err.kind(), err.to_string()));
+            }
         }
-        if len > 516 || len < 4 {
-            /* max size: 2 + 2 + 512 */
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "unexpected size"));
+        Ok(())
+    }
+
+    fn handle_rrq(&self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+        let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
+        let _opts = self.tftp.init_tftp_options(&socket, &mut options, true);
+
+        match mode.as_ref() {
+            "octet" => (),
+            _ => {
+                self.tftp.send_error(&socket, 0, "Unsupported mode")?;
+                return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
+            }
         }
+
+        let path = match self.file_allowed(&filename) {
+            Some(p) => p,
+            None => {
+                println!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
+                self.tftp.send_error(&socket, 2, "Permission denied")?;
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
+            }
+        };
+
+        match self.tftp.send_file(&socket, &path) {
+            Ok(_) => println!("Sent {} to {}.", path.display(), cl),
+            Err(err) => println!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string()),
+        }
+        Ok(())
+    }
+
+    pub fn handle_client(&self, conf: &Configuration, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.connect(cl)?;
+        socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
         let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
-            3 /* DATA */ => (),
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode")),
+            1 /* RRQ */ => {
+                if conf.wo {
+                    self.tftp.send_error(&socket, 4, "reading not allowed")?;
+                    return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
+                } else {
+                    self.handle_rrq(&socket, &cl, &buf[2..])?;
+                }
+            },
+            2 /* WRQ */ => {
+                if conf.ro {
+                    self.tftp.send_error(&socket, 4, "writing not allowed")?;
+                    return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
+                } else {
+                    self.handle_wrq(&socket, &cl, &buf[2..])?;
+                }
+            },
+            5 /* ERROR */ => println!("Received ERROR from {}", cl),
+            _ => {
+                self.tftp.send_error(&socket, 4, "Unexpected opcode")?;
+                return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode"));
+            }
         };
-        let nr = u16::from_be_bytes([buf[2], buf[3]]);
-        if nr != block_nr.wrapping_add(1) {
-            /* already received or packets were missed, re-acknowledge */
-            continue;
-        }
-        block_nr = nr;
-
-        let databuf = &buf[4..len];
-        file.write_all(databuf)?;
-
-        if len < 516 {
-            break;
-        }
+        Ok(())
     }
 
-    file.flush()?;
+    fn drop_privs(&self, uid: u32, gid: u32) -> Result<(), Box<Error>> {
+        let root_uid = Uid::from_raw(0);
+        let root_gid = Gid::from_raw(0);
+        let unpriv_uid = Uid::from_raw(uid);
+        let unpriv_gid = Gid::from_raw(gid);
 
-    send_ack(&sock, block_nr)?;
-
-    Ok(())
-}
-
-fn file_allowed(filename: &Path) -> Option<PathBuf> {
-    /* get parent to check dir where file should be read/written */
-    let path = Path::new(".").join(filename);
-    let path = match path.parent() {
-        Some(p) => p,
-        None => return None,
-    };
-    let path = match path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return None,
-    };
-
-    /* get last component to append to canonicalized path */
-    let filename = match filename.file_name() {
-        Some(f) => f,
-        None => return None,
-    };
-    let path = path.join(filename);
-
-    let cwd = match env::current_dir() {
-        Ok(p) => p,
-        Err(_) => return None,
-    };
-
-    match path.strip_prefix(cwd) {
-        Ok(p) => Some(p.to_path_buf()),
-        Err(_) => return None,
-    }
-}
-
-fn handle_wrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-    let (filename, mode, mut options) = parse_file_mode_options(buf)?;
-    let _opts = init_tftp_options(&socket, &mut options, false);
-
-    match mode.as_ref() {
-        "octet" => (),
-        _ => {
-            send_error(&socket, 0, "Unsupported mode")?;
-            return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
+        if Gid::current() != root_gid && Gid::effective() != root_gid
+            && Uid::current() != root_uid && Uid::effective() != root_uid {
+            /* already unprivileged user */
+            return Ok(());
         }
+
+        if Gid::current() == root_gid || Gid::effective() == root_gid {
+            setresgid(unpriv_gid, unpriv_gid, unpriv_gid)?;
+        }
+
+        if Uid::current() == root_uid || Uid::effective() == root_uid {
+            setresuid(unpriv_uid, unpriv_uid, unpriv_uid)?;
+        }
+
+        Ok(())
     }
 
-    let path = match file_allowed(&filename) {
-        Some(p) => p,
-        None => {
-            println!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
-            send_error(&socket, 2, "Permission denied")?;
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
-        }
-    };
-
-    match recv_file(&socket, &path) {
-        Ok(_) => println!("Received {} from {}.", path.display(), cl),
-        Err(ref err) => {
-            println!("Receiving {} from {} failed ({}).", path.display(), cl, err.to_string());
-            match err.kind() {
-                io::ErrorKind::PermissionDenied => send_error(&socket, 2, "Permission denied")?,
-                io::ErrorKind::AlreadyExists => send_error(&socket, 6, "File already exists")?,
-                _ => send_error(&socket, 0, "Receiving error")?,
+    pub fn start(&self) {
+        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", self.conf.port)) {
+            Ok(s) => s,
+            Err(err) => {
+                println!("Binding a socket failed: {}", err);
+                return;
             }
-            return Err(io::Error::new(err.kind(), err.to_string()));
-        }
-    }
-    Ok(())
-}
-
-
-fn handle_rrq(socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-    let (filename, mode, mut options) = parse_file_mode_options(buf)?;
-    let _opts = init_tftp_options(&socket, &mut options, true);
-
-    match mode.as_ref() {
-        "octet" => (),
-        _ => {
-            send_error(&socket, 0, "Unsupported mode")?;
-            return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
-        }
-    }
-
-    let path = match file_allowed(&filename) {
-        Some(p) => p,
-        None => {
-            println!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
-            send_error(&socket, 2, "Permission denied")?;
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
-        }
-    };
-
-    match send_file(&socket, &path) {
-        Ok(_) => println!("Sent {} to {}.", path.display(), cl),
-        Err(err) => println!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string()),
-    }
-    Ok(())
-}
-
-fn send_error(socket: &UdpSocket, code: u16, msg: &str) -> Result<(), io::Error> {
-    let mut buf = vec![0x00, 0x05];  // opcode
-    buf.extend(code.to_be_bytes().iter());
-    buf.extend(msg.as_bytes());
-
-    socket.send(&buf)?;
-    Ok(())
-}
-
-fn send_ack(sock: &UdpSocket, block_nr: u16) -> Result<(), io::Error> {
-    let mut buf = vec![0x00, 0x04];  // opcode
-    buf.extend(block_nr.to_be_bytes().iter());
-
-    sock.send(&buf)?;
-
-    Ok(())
-}
-
-fn handle_client(conf: &Configuration, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect(cl)?;
-    socket.set_read_timeout(Some(Duration::from_secs(5)))?;
-
-    let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
-        1 /* RRQ */ => {
-            if conf.wo {
-                send_error(&socket, 4, "reading not allowed")?;
-                return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
-            } else {
-                handle_rrq(&socket, &cl, &buf[2..])?;
+        };
+        match self.drop_privs(self.conf.uid, self.conf.gid) {
+            Ok(_) => (),
+            Err(err) => {
+                println!("Dropping privileges failed: {}", err);
+                return;
             }
-        },
-        2 /* WRQ */ => {
-            if conf.ro {
-                send_error(&socket, 4, "writing not allowed")?;
-                return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
-            } else {
-                handle_wrq(&socket, &cl, &buf[2..])?;
+        };
+
+        match env::set_current_dir(&self.conf.dir) {
+            Ok(_) => (),
+            Err(err) => {
+                println!("Changing directory to {} failed ({}).", &self.conf.dir.display(), err);
+                return;
             }
-        },
-        5 /* ERROR */ => println!("Received ERROR from {}", cl),
-        _ => {
-            send_error(&socket, 4, "Unexpected opcode")?;
-            return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode"));
         }
-    };
-    Ok(())
-}
 
-fn drop_privs(uid: u32, gid: u32) -> Result<(), Box<Error>> {
-    let root_uid = Uid::from_raw(0);
-    let root_gid = Gid::from_raw(0);
-    let unpriv_uid = Uid::from_raw(uid);
-    let unpriv_gid = Gid::from_raw(gid);
+        loop {
+            let mut buf = [0; 2048];
+            let (n, src) = match socket.recv_from(&mut buf) {
+                Ok(args) => args,
+                Err(err) => {
+                    println!("Receiving data from socket failed: {}", err);
+                    break;
+                }
+            };
 
-    if Gid::current() != root_gid && Gid::effective() != root_gid
-        && Uid::current() != root_uid && Uid::effective() != root_uid {
-        /* already unprivileged user */
-        return Ok(());
+            match self.handle_client(&self.conf, &src, &buf[0..n]) {
+                /* errors intentionally ignored */
+                _ => (),
+            }
+        }
+
     }
-
-    if Gid::current() == root_gid || Gid::effective() == root_gid {
-        setresgid(unpriv_gid, unpriv_gid, unpriv_gid)?;
-    }
-
-    if Uid::current() == root_uid || Uid::effective() == root_uid {
-        setresuid(unpriv_uid, unpriv_uid, unpriv_uid)?;
-    }
-
-    Ok(())
 }
 
 fn usage(opts: Options, error: Option<String>) {
@@ -522,48 +312,10 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-
     let conf = match parse_commandline(&args) {
         Ok(c) => c,
         Err(_) => return,
     };
 
-    let socket = match UdpSocket::bind(format!("0.0.0.0:{}", conf.port)) {
-        Ok(s) => s,
-        Err(err) => {
-            println!("Binding a socket failed: {}", err);
-            return;
-        }
-    };
-    match drop_privs(conf.uid, conf.gid) {
-        Ok(_) => (),
-        Err(err) => {
-            println!("Dropping privileges failed: {}", err);
-            return;
-        }
-    };
-
-    match env::set_current_dir(&conf.dir) {
-        Ok(_) => (),
-        Err(err) => {
-            println!("Changing directory to {} failed ({}).", &conf.dir.display(), err);
-            return;
-        }
-    }
-
-    loop {
-        let mut buf = [0; 2048];
-        let (n, src) = match socket.recv_from(&mut buf) {
-            Ok(args) => args,
-            Err(err) => {
-                println!("Receiving data from socket failed: {}", err);
-                break;
-            }
-        };
-
-        match handle_client(&conf, &src, &buf[0..n]) {
-            /* errors intentionally ignored */
-            _ => (),
-        }
-    }
+    Tftpd::new(conf).start();
 }
