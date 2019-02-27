@@ -71,9 +71,9 @@ impl Tftpd {
     }
 
 
-    fn handle_wrq(&self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+    fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
-        let _opts = self.tftp.init_tftp_options(&socket, &mut options, false);
+        self.tftp.init_tftp_options(&socket, &mut options, false)?;
 
         match mode.as_ref() {
             "octet" => (),
@@ -107,9 +107,9 @@ impl Tftpd {
         Ok(())
     }
 
-    fn handle_rrq(&self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+    fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
-        let _opts = self.tftp.init_tftp_options(&socket, &mut options, true);
+        self.tftp.init_tftp_options(&socket, &mut options, true)?;
 
         match mode.as_ref() {
             "octet" => (),
@@ -135,14 +135,14 @@ impl Tftpd {
         Ok(())
     }
 
-    pub fn handle_client(&self, conf: &Configuration, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
+    pub fn handle_client(&mut self, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.connect(cl)?;
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
         let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
             1 /* RRQ */ => {
-                if conf.wo {
+                if self.conf.wo {
                     self.tftp.send_error(&socket, 4, "reading not allowed")?;
                     return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
                 } else {
@@ -150,7 +150,7 @@ impl Tftpd {
                 }
             },
             2 /* WRQ */ => {
-                if conf.ro {
+                if self.conf.ro {
                     self.tftp.send_error(&socket, 4, "writing not allowed")?;
                     return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
                 } else {
@@ -189,7 +189,7 @@ impl Tftpd {
         Ok(())
     }
 
-    pub fn start(&self) {
+    pub fn start(&mut self) {
         let socket = match UdpSocket::bind(format!("0.0.0.0:{}", self.conf.port)) {
             Ok(s) => s,
             Err(err) => {
@@ -223,7 +223,7 @@ impl Tftpd {
                 }
             };
 
-            match self.handle_client(&self.conf, &src, &buf[0..n]) {
+            match self.handle_client(&src, &buf[0..n]) {
                 /* errors intentionally ignored */
                 _ => (),
             }
