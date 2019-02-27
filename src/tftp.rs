@@ -10,9 +10,11 @@ use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::io;
 use std::io::prelude::*;
+use std::time::Duration;
 
 pub struct TftpOptions {
     blksize: usize,
+    timeout: u8,
 }
 
 pub struct Tftp {
@@ -22,6 +24,7 @@ pub struct Tftp {
 fn default_options() -> TftpOptions {
     TftpOptions {
         blksize: 512,
+        timeout: 3,
     }
 }
 
@@ -114,12 +117,23 @@ impl Tftp {
                             self.options.blksize = b;
                             true
                         }
-                        _ => false,
+                        _ => false
+                    }
+                }
+                "timeout" => {
+                    match val.parse() {
+                        Ok(t) if t >= 1 => {
+                            self.options.timeout = t;
+                            true
+                        }
+                        _ => false
                     }
                 }
                 _ => false
             }
         });
+
+        sock.set_read_timeout(Some(Duration::from_secs(self.options.timeout as u64)))?;
 
         self.ack_options(&sock, &options, ackwait)?;
 
