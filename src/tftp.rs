@@ -106,7 +106,8 @@ impl Tftp {
         self.options = default_options();
 
         options.retain(|key, val| {
-            match key.as_str() {
+            let val = val.to_lowercase();
+            match key.to_lowercase().as_str() {
                 "blksize" => {
                     match val.parse() {
                         Ok(b) if b >= 8 && b <= 65464 => {
@@ -161,7 +162,7 @@ impl Tftp {
         let filename = Path::new(&filename);
 
         let (mode, len) = match self.get_tftp_str(&buf[pos ..]) {
-            Some(args) => args,
+            Some((m,l)) => (m.to_lowercase(), l),
             None => return Err(dataerr),
         };
         pos += len + 1;
