@@ -12,3 +12,7 @@ getopts = "0.2.18"
 [[bin]]
 name = "rtftpd"
 path = "src/tftpd.rs"
+
+[[bin]]
+name = "rtftpc"
+path = "src/tftpc.rs"

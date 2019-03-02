@@ -4,6 +4,8 @@
  */
 
 use std::net::{SocketAddr,UdpSocket};
+use std::fs::OpenOptions;
+use std::fs::File;
 use std::path::{Path,PathBuf};
 use std::error::Error;
 use std::env;
@@ -19,12 +21,12 @@ use getopts::Options;
 mod tftp;
 
 struct Configuration {
-    pub port: u16,
-    pub uid: u32,
-    pub gid: u32,
-    pub ro: bool,
-    pub wo: bool,
-    pub dir: PathBuf,
+    port: u16,
+    uid: u32,
+    gid: u32,
+    ro: bool,
+    wo: bool,
+    dir: PathBuf,
 }
 
 struct Tftpd {
@@ -92,15 +94,25 @@ impl Tftpd {
             }
         };
 
-        match self.tftp.recv_file(&socket, &path) {
+        let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => f,
+            Err(ref err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                println!("Receiving {} from {} failed ({}).", path.display(), cl, err);
+                self.tftp.send_error(&socket, 6, "File already exists")?;
+                return Err(io::Error::new(err.kind(), "already exists"));
+            },
+            Err(err) => {
+                println!("Receiving {} from {} failed ({}).", path.display(), cl, err);
+                self.tftp.send_error(&socket, 6, "Permission denied")?;
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
+            }
+        };
+
+        match self.tftp.recv_file(&socket, &mut file) {
             Ok(_) => println!("Received {} from {}.", path.display(), cl),
             Err(ref err) => {
-                println!("Receiving {} from {} failed ({}).", path.display(), cl, err.to_string());
-                match err.kind() {
-                    io::ErrorKind::PermissionDenied => self.tftp.send_error(&socket, 2, "Permission denied")?,
-                    io::ErrorKind::AlreadyExists => self.tftp.send_error(&socket, 6, "File already exists")?,
-                    _ => self.tftp.send_error(&socket, 0, "Receiving error")?,
-                }
+                println!("Receiving {} from {} failed ({}).", path.display(), cl, err);
+                self.tftp.send_error(&socket, 0, "Receiving error")?;
                 return Err(io::Error::new(err.kind(), err.to_string()));
             }
         }
@@ -128,7 +140,22 @@ impl Tftpd {
             }
         };
 
-        match self.tftp.send_file(&socket, &path) {
+        let mut file = match File::open(&path) {
+            Ok(f) => f,
+            Err(ref error) if error.kind() == io::ErrorKind::NotFound => {
+                self.tftp.send_error(&socket, 1, "File not found")?;
+                return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
+            },
+            Err(_) => {
+                self.tftp.send_error(&socket, 2, "Permission denied")?;
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
+            }
+        };
+        if !file.metadata()?.is_file() {
+            self.tftp.send_error(&socket, 1, "File not found")?;
+            return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
+        }
+        match self.tftp.send_file(&socket, &mut file) {
             Ok(_) => println!("Sent {} to {}.", path.display(), cl),
             Err(err) => println!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string()),
         }
@@ -137,8 +164,8 @@ impl Tftpd {
 
     pub fn handle_client(&mut self, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let socket = UdpSocket::bind("[::]:0")?;
-        socket.connect(cl)?;
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+        socket.connect(cl)?;
 
         let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
             1 /* RRQ */ => {

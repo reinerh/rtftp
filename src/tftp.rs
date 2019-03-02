@@ -4,7 +4,6 @@
  */
 
 use std::net::UdpSocket;
-use std::fs::OpenOptions;
 use std::fs::File;
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
@@ -204,23 +203,7 @@ impl Tftp {
         Ok(())
     }
 
-    pub fn send_file(&self, socket: &UdpSocket, path: &Path) -> Result<(), io::Error> {
-        let mut file = match File::open(path) {
-            Ok(f) => f,
-            Err(ref error) if error.kind() == io::ErrorKind::NotFound => {
-                self.send_error(&socket, 1, "File not found")?;
-                return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
-            },
-            Err(_) => {
-                self.send_error(&socket, 2, "Permission denied")?;
-                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
-            }
-        };
-        if !file.metadata()?.is_file() {
-            self.send_error(&socket, 1, "File not found")?;
-            return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
-        }
-
+    pub fn send_file(&self, socket: &UdpSocket, file: &mut File) -> Result<(), io::Error> {
         let mut block_nr: u16 = 1;
 
         loop {
@@ -268,15 +251,7 @@ impl Tftp {
         Ok(())
     }
 
-    pub fn recv_file(&self, sock: &UdpSocket, path: &PathBuf) -> Result<(), io::Error> {
-        let mut file = match OpenOptions::new().write(true).create_new(true).open(path) {
-            Ok(f) => f,
-            Err(ref err) if err.kind() == io::ErrorKind::AlreadyExists => {
-                return Err(io::Error::new(err.kind(), "already exists"));
-            },
-            Err(_) => return Err(io::Error::new(io::ErrorKind::PermissionDenied, "permission denied")),
-        };
-
+    pub fn recv_file(&self, sock: &UdpSocket, file: &mut File) -> Result<(), io::Error> {
         let mut block_nr: u16 = 1;
 
         loop {
