@@ -259,16 +259,16 @@ impl Tftpd {
     }
 }
 
-fn usage(opts: Options, error: Option<String>) {
+fn usage(opts: Options, program: String, error: Option<String>) {
     match error {
         None => {},
         Some(err) => println!("{}\n", err),
     }
-    println!("{}", opts.usage("RusTFTP"));
-
+    println!("{}", opts.usage(format!("RusTFTP\n\n{} [options]", program).as_str()));
 }
 
 fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str> {
+    let program = args[0].clone();
     let mut conf = Configuration{
         port: 69,
         uid: 65534,
@@ -288,47 +288,47 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(err) => {
-            usage(opts, Some(err.to_string()));
+            usage(opts, program, Some(err.to_string()));
             return Err("Parsing error");
         }
     };
     if matches.opt_present("h") {
-        usage(opts, None);
+        usage(opts, program, None);
         return Err("usage");
     }
 
     conf.port = match matches.opt_get_default::<u16>("p", conf.port) {
         Ok(p) => p,
         Err(err) => {
-            usage(opts, Some(err.to_string()));
+            usage(opts, program, Some(err.to_string()));
             return Err("port");
         }
     };
     conf.uid = match matches.opt_get_default::<u32>("u", conf.uid) {
         Ok(u) => u,
         Err(err) => {
-            usage(opts, Some(err.to_string()));
+            usage(opts, program, Some(err.to_string()));
             return Err("uid");
         }
     };
     conf.gid = match matches.opt_get_default::<u32>("g", conf.gid) {
         Ok(g) => g,
         Err(err) => {
-            usage(opts, Some(err.to_string()));
+            usage(opts, program, Some(err.to_string()));
             return Err("gid");
         }
     };
     conf.ro = matches.opt_present("r");
     conf.wo = matches.opt_present("w");
     if conf.ro && conf.wo {
-        usage(opts, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
+        usage(opts, program, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
         return Err("ro and wo");
     }
     if matches.opt_present("d") {
         conf.dir = match matches.opt_str("d") {
             Some(d) => Path::new(&d).to_path_buf(),
             None => {
-                usage(opts, None);
+                usage(opts, program, None);
                 return Err("directory");
             }
         };
