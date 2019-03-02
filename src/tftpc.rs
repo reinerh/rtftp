@@ -14,7 +14,7 @@ use std::os::unix::ffi::OsStrExt; /* for converting filename into bytes */
 extern crate getopts;
 use getopts::Options;
 
-mod tftp;
+extern crate rtftp;
 
 enum Mode {
     RRQ,
@@ -28,14 +28,14 @@ struct Configuration {
 }
 
 struct Tftpc {
-    tftp: tftp::Tftp,
+    tftp: rtftp::Tftp,
     conf: Configuration,
 }
 
 impl Tftpc {
     pub fn new(conf: Configuration) -> Tftpc {
         Tftpc {
-            tftp: tftp::Tftp::new(),
+            tftp: rtftp::Tftp::new(),
             conf: conf,
         }
     }

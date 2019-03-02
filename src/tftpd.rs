@@ -18,7 +18,7 @@ use nix::unistd::{Gid,Uid,setresgid,setresuid};
 extern crate getopts;
 use getopts::Options;
 
-mod tftp;
+extern crate rtftp;
 
 struct Configuration {
     port: u16,
@@ -30,14 +30,14 @@ struct Configuration {
 }
 
 struct Tftpd {
-    tftp: tftp::Tftp,
+    tftp: rtftp::Tftp,
     conf: Configuration,
 }
 
 impl Tftpd {
     pub fn new(conf: Configuration) -> Tftpd {
         Tftpd{
-            tftp: tftp::Tftp::new(),
+            tftp: rtftp::Tftp::new(),
             conf: conf,
         }
     }
