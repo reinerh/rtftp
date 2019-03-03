@@ -69,21 +69,60 @@ impl Tftp {
         buf.push(0x00);
     }
 
+    pub fn parse_error(&self, buf: &[u8]) -> std::io::Error {
+        let mut kind = std::io::ErrorKind::InvalidData;
+        let mut error = String::from("Invalid packet received");
+
+        if buf.len() < 5 {
+            return std::io::Error::new(kind, error);
+        }
+
+        let opcode = u16::from_be_bytes([buf[0], buf[1]]);
+        if opcode != Opcodes::ERROR as u16 {
+            return std::io::Error::new(kind, error);
+        }
+
+        let errorcode = u16::from_be_bytes([buf[2], buf[3]]);
+        error = match String::from_utf8(buf[4 ..].to_vec()) {
+            Ok(e) => e,
+            Err(_) => return std::io::Error::new(kind, error),
+        };
+
+        kind = match errorcode {
+            1 => std::io::ErrorKind::NotFound,
+            2 => std::io::ErrorKind::PermissionDenied,
+            3 => std::io::ErrorKind::UnexpectedEof,
+            4 => std::io::ErrorKind::InvalidData,
+            5 => std::io::ErrorKind::InvalidInput,
+            6 => std::io::ErrorKind::AlreadyExists,
+            7 => std::io::ErrorKind::NotFound,
+            _ => std::io::ErrorKind::InvalidData,
+        };
+
+        return std::io::Error::new(kind, error);
+    }
+
     fn wait_for_ack(&self, sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
-        let mut buf = [0; 4];
-        match sock.recv(&mut buf) {
-            Ok(_) => (),
+        let mut buf = [0; 512];
+        let len = match sock.recv(&mut buf) {
+            Ok(l) => l,
             Err(ref error) if [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut].contains(&error.kind()) => {
                 return Ok(false);
             }
             Err(err) => return Err(err),
         };
 
+        if len < 4 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid data received"));
+        }
+
         let opcode = u16::from_be_bytes([buf[0], buf[1]]);
         let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
 
         if opcode == Opcodes::ACK as u16 && block_nr == expected_block {
             return Ok(true)
+        } else if opcode == Opcodes::ERROR as u16 {
+            return Err(self.parse_error(&buf[4 ..]));
         }
 
         Ok(false)
@@ -312,6 +351,7 @@ impl Tftp {
 
             let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
                 opc if opc == Opcodes::DATA as u16 => (),
+                opc if opc == Opcodes::ERROR as u16 => return Err(self.parse_error(&buf[.. len])),
                 _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode")),
             };
             if u16::from_be_bytes([buf[2], buf[3]]) != block_nr {

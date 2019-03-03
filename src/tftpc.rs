@@ -65,30 +65,36 @@ impl Tftpc {
         Some(remote)
     }
 
-    fn wait_for_response(&self, sock: &UdpSocket, expected_opcode: rtftp::Opcodes, expected_block: u16, expected_remote: Option<SocketAddr>) -> Option<SocketAddr> {
+    fn wait_for_response(&self, sock: &UdpSocket, expected_opcode: rtftp::Opcodes, expected_block: u16, expected_remote: Option<SocketAddr>) -> Result<Option<SocketAddr>, std::io::Error> {
         let mut buf = [0; 4];
         let (len, remote) = match sock.peek_from(&mut buf) {
             Ok(args) => args,
-            Err(_) => return None,
+            Err(err) => return Err(err),
         };
 
         if let Some(rem) = expected_remote {
             /* verify we got a response from the same client that sent
                an optional previous option ack */
             if rem != remote {
-                return None;
+                return Ok(None);
             }
         }
 
         let opcode = u16::from_be_bytes([buf[0], buf[1]]);
         let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
 
-        /* first data packet is expected to be block 1 */
-        if len != 4 || opcode != expected_opcode as u16 || block_nr != expected_block {
-            return None;
+        if opcode == rtftp::Opcodes::ERROR as u16 {
+            let mut buf = [0; 512];
+            let len = sock.recv(&mut buf)?;
+            return Err(self.tftp.parse_error(&buf[ ..len]));
         }
 
-        Some(remote)
+        /* first data packet is expected to be block 1 */
+        if len != 4 || opcode != expected_opcode as u16 || block_nr != expected_block {
+            return Ok(None);
+        }
+
+        Ok(Some(remote))
     }
 
     fn append_option_req(&self, buf: &mut Vec<u8>, fsize: u64) {
@@ -97,24 +103,25 @@ impl Tftpc {
         self.tftp.append_option(buf, "tsize", &format!("{}", fsize));
     }
 
-    fn handle_wrq(&mut self, sock: &UdpSocket) -> Result<(), io::Error> {
+    fn handle_wrq(&mut self, sock: &UdpSocket) -> Result<String, io::Error> {
         let mut file = match File::open(self.conf.filename.as_path()) {
             Ok(f) => f,
             Err(err) => return Err(err),
         };
+        let err_invalidpath = io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename");
         let filename = match self.conf.filename.file_name() {
             Some(f) => match f.to_str() {
                 Some(s) => s,
-                None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
+                None => return Err(err_invalidpath),
             }
-            None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
+            None => return Err(err_invalidpath),
         };
         let metadata = match file.metadata() {
             Ok(m) => m,
-            Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
+            Err(_) => return Err(err_invalidpath),
         };
         if !metadata.is_file() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename"));
+            return Err(err_invalidpath);
         }
 
         let mut buf = Vec::with_capacity(512);
@@ -128,7 +135,7 @@ impl Tftpc {
             remote = self.wait_for_option_ack(&sock);
             if remote.is_none() {
                 /* for WRQ either OACK or ACK is replied */
-                remote = self.wait_for_response(&sock, rtftp::Opcodes::ACK, 0, None);
+                remote = self.wait_for_response(&sock, rtftp::Opcodes::ACK, 0, None)?;
             }
             if remote.is_some() {
                 break;
@@ -141,17 +148,16 @@ impl Tftpc {
         }
 
         match self.tftp.send_file(&sock, &mut file) {
-            Ok(_) => println!("Sent {} to {}.", self.conf.filename.display(), self.conf.remote),
+            Ok(_) => return Ok(format!("Sent {} to {}.", self.conf.filename.display(), self.conf.remote)),
             Err(err) => {
+                let error = format!("Sending {} to {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
                 self.tftp.send_error(&sock, 0, "Sending error")?;
-                println!("Sending {} to {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
+                return Err(io::Error::new(err.kind(), error));
             },
         }
-
-        Ok(())
     }
 
-    fn handle_rrq(&mut self, sock: &UdpSocket) -> Result<(), io::Error> {
+    fn handle_rrq(&mut self, sock: &UdpSocket) -> Result<String, io::Error> {
         let filename = match self.conf.filename.file_name() {
             Some(f) => f,
             None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
@@ -179,7 +185,7 @@ impl Tftpc {
                 /* for RRQ the received OACKs need to be acked */
                 self.tftp.send_ack_to(&sock, r, 0)?;
             }
-            remote = self.wait_for_response(&sock, rtftp::Opcodes::DATA, 1, oack_remote);
+            remote = self.wait_for_response(&sock, rtftp::Opcodes::DATA, 1, oack_remote)?;
             if remote.is_some() {
                 break;
             }
@@ -191,14 +197,13 @@ impl Tftpc {
         }
 
         match self.tftp.recv_file(&sock, &mut file) {
-            Ok(_) => println!("Received {} from {}.", self.conf.filename.display(), self.conf.remote),
+            Ok(_) => return Ok(format!("Received {} from {}.", self.conf.filename.display(), self.conf.remote)),
             Err(err) => {
+                let error = format!("Receiving {} from {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
                 self.tftp.send_error(&sock, 0, "Receiving error")?;
-                println!("Receiving {} from {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
+                return Err(std::io::Error::new(err.kind(), error));
             },
         }
-
-        Ok(())
     }
 
     pub fn start(&mut self) {
@@ -210,7 +215,7 @@ impl Tftpc {
             Mode::WRQ => self.handle_wrq(&socket),
         };
         match err {
-            Ok(_) => {},
+            Ok(msg) => println!("{}", msg),
             Err(err) => {
                 println!("Error: {}", err);
                 return;
