@@ -75,7 +75,8 @@ impl Tftpd {
 
     fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
-        self.tftp.init_tftp_options(&socket, &mut options, false)?;
+        self.tftp.init_tftp_options(&socket, &mut options)?;
+        self.tftp.ack_options(&socket, &options, false)?;
 
         match mode.as_ref() {
             "octet" => (),
@@ -121,7 +122,8 @@ impl Tftpd {
 
     fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
-        self.tftp.init_tftp_options(&socket, &mut options, true)?;
+        self.tftp.init_tftp_options(&socket, &mut options)?;
+        self.tftp.ack_options(&socket, &options, true)?;
 
         match mode.as_ref() {
             "octet" => (),

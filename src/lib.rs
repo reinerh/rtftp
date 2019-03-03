@@ -3,7 +3,7 @@
  * License: GPL-3+
  */
 
-use std::net::UdpSocket;
+use std::net::{SocketAddr,UdpSocket};
 use std::fs::File;
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
@@ -60,6 +60,13 @@ impl Tftp {
         return Some((val, len));
     }
 
+    pub fn append_option(&self, buf: &mut Vec<u8>, key: &str, val: &str) {
+        buf.extend(key.bytes());
+        buf.push(0x00);
+        buf.extend(val.bytes());
+        buf.push(0x00);
+    }
+
     fn wait_for_ack(&self, sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
         let mut buf = [0; 4];
         match sock.recv(&mut buf) {
@@ -80,7 +87,7 @@ impl Tftp {
         Ok(false)
     }
 
-    fn ack_options(&self, sock: &UdpSocket, options: &HashMap<String, String>, ackwait: bool) -> Result<(), io::Error> {
+    pub fn ack_options(&self, sock: &UdpSocket, options: &HashMap<String, String>, ackwait: bool) -> Result<(), io::Error> {
         if options.is_empty() {
             if !ackwait {
                 /* it's a WRQ, send normal ack to start transfer */
@@ -93,10 +100,7 @@ impl Tftp {
         buf.extend((Opcodes::OACK as u16).to_be_bytes().iter());
 
         for (key, val) in options {
-            buf.extend(key.bytes());
-            buf.push(0x00);
-            buf.extend(val.bytes());
-            buf.push(0x00);
+            self.append_option(&mut buf, key, val);
         }
 
         for _ in 1..5 {
@@ -114,7 +118,7 @@ impl Tftp {
         Err(io::Error::new(io::ErrorKind::TimedOut, "ack timeout"))
     }
 
-    pub fn init_tftp_options(&mut self, sock: &UdpSocket, options: &mut HashMap<String, String>, ackwait: bool) -> Result<(), io::Error> {
+    pub fn init_tftp_options(&mut self, sock: &UdpSocket, options: &mut HashMap<String, String>) -> Result<(), io::Error> {
         self.options = default_options();
 
         options.retain(|key, val| {
@@ -144,12 +148,10 @@ impl Tftp {
 
         sock.set_read_timeout(Some(Duration::from_secs(self.options.timeout as u64)))?;
 
-        self.ack_options(&sock, &options, ackwait)?;
-
         return Ok(());
     }
 
-    fn parse_options(&self, buf: &[u8]) -> HashMap<String, String> {
+    pub fn parse_options(&self, buf: &[u8]) -> HashMap<String, String> {
         let mut options = HashMap::new();
 
         let mut pos = 0;
@@ -205,13 +207,24 @@ impl Tftp {
         Ok(())
     }
 
-    pub fn send_ack(&self, sock: &UdpSocket, block_nr: u16) -> Result<(), io::Error> {
+    fn _send_ack(&self, sock: &UdpSocket, cl: Option<SocketAddr>, block_nr: u16) -> Result<(), io::Error> {
         let mut buf = Vec::with_capacity(4);
         buf.extend((Opcodes::ACK as u16).to_be_bytes().iter());
         buf.extend(block_nr.to_be_bytes().iter());
 
-        sock.send(&buf)?;
+        match cl {
+            Some(remote) => { sock.send_to(&buf, remote)?; }
+            None => { sock.send(&buf)?; }
+        }
         Ok(())
+    }
+
+    pub fn send_ack(&self, sock: &UdpSocket, block_nr: u16) -> Result<(), io::Error> {
+        self._send_ack(sock, None, block_nr)
+    }
+
+    pub fn send_ack_to(&self, sock: &UdpSocket, cl: SocketAddr, block_nr: u16) -> Result<(), io::Error> {
+        self._send_ack(sock, Some(cl), block_nr)
     }
 
     pub fn send_file(&self, socket: &UdpSocket, file: &mut File) -> Result<(), io::Error> {

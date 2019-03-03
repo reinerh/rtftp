@@ -9,7 +9,6 @@ use std::path::{Path,PathBuf};
 use std::env;
 use std::io;
 use std::time::Duration;
-use std::os::unix::ffi::OsStrExt; /* for converting filename into bytes */
 
 extern crate getopts;
 use getopts::Options;
@@ -40,46 +39,89 @@ impl Tftpc {
         }
     }
 
-    fn wait_for_response(&self, sock: &UdpSocket, expected_opcode: u16, expected_block: u16) -> Option<SocketAddr> {
+    fn wait_for_option_ack(&mut self, sock: &UdpSocket) -> Option<SocketAddr> {
+        let mut buf = [0; 512];
+        match sock.peek_from(&mut buf) {
+            Ok(_) => (),
+            Err(_) => return None,
+        };
+        let opcode = u16::from_be_bytes([buf[0], buf[1]]);
+        if opcode != rtftp::Opcodes::OACK as u16 {
+            return None;
+        }
+
+        let (len, remote) = match sock.recv_from(&mut buf) {
+            Ok(args) => args,
+            Err(_) => return None,
+        };
+
+        let mut options = self.tftp.parse_options(&buf[2 .. len]);
+        match self.tftp.init_tftp_options(&sock, &mut options) {
+            Ok(_) => {},
+            Err(_) => return None,
+        }
+
+        Some(remote)
+    }
+
+    fn wait_for_response(&self, sock: &UdpSocket, expected_opcode: rtftp::Opcodes, expected_block: u16, expected_remote: Option<SocketAddr>) -> Option<SocketAddr> {
         let mut buf = [0; 4];
         let (len, remote) = match sock.peek_from(&mut buf) {
             Ok(args) => args,
             Err(_) => return None,
         };
 
+        if let Some(rem) = expected_remote {
+            /* verify we got a response from the same client that sent
+               an optional previous option ack */
+            if rem != remote {
+                return None;
+            }
+        }
+
         let opcode = u16::from_be_bytes([buf[0], buf[1]]);
         let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
 
         /* first data packet is expected to be block 1 */
-        if len != 4 || opcode != expected_opcode || block_nr != expected_block {
+        if len != 4 || opcode != expected_opcode as u16 || block_nr != expected_block {
             return None;
         }
 
         Some(remote)
     }
 
-    fn handle_wrq(&self, sock: &UdpSocket) -> Result<(), io::Error> {
+    fn append_option_req(&self, buf: &mut Vec<u8>) {
+        self.tftp.append_option(buf, "blksize", &format!("{}", 1428));
+        self.tftp.append_option(buf, "timeout", &format!("{}", 3));
+    }
+
+    fn handle_wrq(&mut self, sock: &UdpSocket) -> Result<(), io::Error> {
         let mut file = match File::open(self.conf.filename.as_path()) {
             Ok(f) => f,
             Err(err) => return Err(err),
         };
         let filename = match self.conf.filename.file_name() {
-            Some(f) => f,
+            Some(f) => match f.to_str() {
+                Some(s) => s,
+                None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
+            }
             None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
         };
 
         let mut buf = Vec::with_capacity(512);
-        buf.extend([0x00, 0x02].iter());
-        buf.extend(filename.as_bytes());
-        buf.push(0x00);
-        buf.extend("octet".bytes());
-        buf.push(0x00);
+        buf.extend((rtftp::Opcodes::WRQ as u16).to_be_bytes().iter());
+        self.tftp.append_option(&mut buf, filename, "octet");
+        self.append_option_req(&mut buf);
 
         let mut remote = None;
         for _ in 1 .. 3 {
             sock.send_to(&buf, self.conf.remote)?;
-            remote = self.wait_for_response(&sock, rtftp::Opcodes::ACK as u16, 0);
-            if let Some(_) = remote {
+            remote = self.wait_for_option_ack(&sock);
+            if remote.is_none() {
+                /* for WRQ either OACK or ACK is replied */
+                remote = self.wait_for_response(&sock, rtftp::Opcodes::ACK, 0, None);
+            }
+            if remote.is_some() {
                 break;
             }
         }
@@ -100,7 +142,7 @@ impl Tftpc {
         Ok(())
     }
 
-    fn handle_rrq(&self, sock: &UdpSocket) -> Result<(), io::Error> {
+    fn handle_rrq(&mut self, sock: &UdpSocket) -> Result<(), io::Error> {
         let filename = match self.conf.filename.file_name() {
             Some(f) => f,
             None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
@@ -110,19 +152,26 @@ impl Tftpc {
             Ok(f) => f,
             Err(err) => return Err(err),
         };
+        let filename = match self.conf.filename.to_str() {
+            Some(f) => f,
+            None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
+        };
 
         let mut buf = Vec::with_capacity(512);
-        buf.extend([0x00, 0x01].iter());
-        buf.extend(self.conf.filename.as_os_str().as_bytes());
-        buf.push(0x00);
-        buf.extend("octet".bytes());
-        buf.push(0x00);
+        buf.extend((rtftp::Opcodes::RRQ as u16).to_be_bytes().iter());
+        self.tftp.append_option(&mut buf, filename, "octet");
+        self.append_option_req(&mut buf);
 
         let mut remote = None;
         for _ in 1 .. 3 {
             sock.send_to(&buf, self.conf.remote)?;
-            remote = self.wait_for_response(&sock, rtftp::Opcodes::DATA as u16, 1);
-            if let Some(_) = remote {
+            let oack_remote = self.wait_for_option_ack(&sock);
+            if let Some(r) = oack_remote {
+                /* for RRQ the received OACKs need to be acked */
+                self.tftp.send_ack_to(&sock, r, 0)?;
+            }
+            remote = self.wait_for_response(&sock, rtftp::Opcodes::DATA, 1, oack_remote);
+            if remote.is_some() {
                 break;
             }
         }
@@ -143,10 +192,9 @@ impl Tftpc {
         Ok(())
     }
 
-    pub fn start(&self) {
+    pub fn start(&mut self) {
         let socket = UdpSocket::bind("[::]:0").expect("binding failed");
         socket.set_read_timeout(Some(Duration::from_secs(5))).expect("setting socket timeout failed");
-        //socket.connect(self.conf.remote).expect("conneting to remote failed");
 
         let err = match self.conf.mode {
             Mode::RRQ => self.handle_rrq(&socket),
