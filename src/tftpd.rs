@@ -76,7 +76,6 @@ impl Tftpd {
     fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
         self.tftp.init_tftp_options(&socket, &mut options)?;
-        self.tftp.ack_options(&socket, &options, false)?;
 
         match mode.as_ref() {
             "octet" => (),
@@ -109,6 +108,7 @@ impl Tftpd {
             }
         };
 
+        self.tftp.ack_options(&socket, &options, false)?;
         match self.tftp.recv_file(&socket, &mut file) {
             Ok(_) => println!("Received {} from {}.", path.display(), cl),
             Err(ref err) => {
@@ -123,7 +123,6 @@ impl Tftpd {
     fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(), io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
         self.tftp.init_tftp_options(&socket, &mut options)?;
-        self.tftp.ack_options(&socket, &options, true)?;
 
         match mode.as_ref() {
             "octet" => (),
@@ -157,6 +156,11 @@ impl Tftpd {
             self.tftp.send_error(&socket, 1, "File not found")?;
             return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
         }
+
+        if let Some(opt) = options.get_mut("tsize") {
+            *opt = file.metadata()?.len().to_string();
+        }
+        self.tftp.ack_options(&socket, &options, true)?;
         match self.tftp.send_file(&socket, &mut file) {
             Ok(_) => println!("Sent {} to {}.", path.display(), cl),
             Err(err) => println!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string()),

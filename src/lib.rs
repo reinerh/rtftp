@@ -24,6 +24,7 @@ pub enum Opcodes {
 pub struct TftpOptions {
     blksize: usize,
     timeout: u8,
+    tsize: usize,
 }
 
 pub struct Tftp {
@@ -34,6 +35,7 @@ fn default_options() -> TftpOptions {
     TftpOptions {
         blksize: 512,
         timeout: 3,
+        tsize: 0,
     }
 }
 
@@ -137,6 +139,15 @@ impl Tftp {
                     match val.parse() {
                         Ok(t) if t >= 1 => {
                             self.options.timeout = t;
+                            true
+                        }
+                        _ => false
+                    }
+                }
+                "tsize" => {
+                    match val.parse() {
+                        Ok(t) => {
+                            self.options.tsize = t;
                             true
                         }
                         _ => false

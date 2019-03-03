@@ -90,9 +90,10 @@ impl Tftpc {
         Some(remote)
     }
 
-    fn append_option_req(&self, buf: &mut Vec<u8>) {
+    fn append_option_req(&self, buf: &mut Vec<u8>, fsize: u64) {
         self.tftp.append_option(buf, "blksize", &format!("{}", 1428));
         self.tftp.append_option(buf, "timeout", &format!("{}", 3));
+        self.tftp.append_option(buf, "tsize", &format!("{}", fsize));
     }
 
     fn handle_wrq(&mut self, sock: &UdpSocket) -> Result<(), io::Error> {
@@ -107,11 +108,18 @@ impl Tftpc {
             }
             None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
         };
+        let metadata = match file.metadata() {
+            Ok(m) => m,
+            Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
+        };
+        if !metadata.is_file() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename"));
+        }
 
         let mut buf = Vec::with_capacity(512);
         buf.extend((rtftp::Opcodes::WRQ as u16).to_be_bytes().iter());
         self.tftp.append_option(&mut buf, filename, "octet");
-        self.append_option_req(&mut buf);
+        self.append_option_req(&mut buf, metadata.len());
 
         let mut remote = None;
         for _ in 1 .. 3 {
@@ -160,7 +168,7 @@ impl Tftpc {
         let mut buf = Vec::with_capacity(512);
         buf.extend((rtftp::Opcodes::RRQ as u16).to_be_bytes().iter());
         self.tftp.append_option(&mut buf, filename, "octet");
-        self.append_option_req(&mut buf);
+        self.append_option_req(&mut buf, 0);
 
         let mut remote = None;
         for _ in 1 .. 3 {
