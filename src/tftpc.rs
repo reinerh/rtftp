@@ -24,6 +24,7 @@ struct Configuration {
     mode: Mode,
     filename: PathBuf,
     remote: SocketAddr,
+    blksize: usize,
 }
 
 struct Tftpc {
@@ -91,7 +92,7 @@ impl Tftpc {
     }
 
     fn append_option_req(&self, buf: &mut Vec<u8>, fsize: u64) {
-        self.tftp.append_option(buf, "blksize", &format!("{}", 1428));
+        self.tftp.append_option(buf, "blksize", &format!("{}", self.conf.blksize));
         self.tftp.append_option(buf, "timeout", &format!("{}", 3));
         self.tftp.append_option(buf, "tsize", &format!("{}", fsize));
     }
@@ -230,11 +231,13 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
     let program = args[0].clone();
     let mut mode = None;
     let mut filename = None;
+    let mut blksize = 1428;
 
     let mut opts = Options::new();
     opts.optflag("h", "help", "display usage information");
     opts.optopt("g", "get", "download file from remote server", "FILE");
     opts.optopt("p", "put", "upload file to remote server", "FILE");
+    opts.optopt("b", "blksize", format!("negotiate a different block size (default: {})", blksize).as_ref(), "SIZE");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(err) => {
@@ -281,10 +284,19 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
         }
     };
 
+    blksize = match matches.opt_get_default::<usize>("b", blksize) {
+        Ok(b) => b,
+        Err(err) => {
+            usage(opts, program, Some(err.to_string()));
+            return Err("blksize");
+        }
+    };
+
     Ok(Configuration{
         mode: mode.unwrap(),
         filename: filename.unwrap(),
         remote: remote.unwrap(),
+        blksize: blksize,
     })
 }
 

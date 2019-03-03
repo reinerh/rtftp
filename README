@@ -26,6 +26,7 @@ Client:
      -h, --help          display usage information
      -g, --get FILE      download file from remote server
      -p, --put FILE      upload file to remote server
+     -b, --blksize SIZE  negotiate a different block size (default: 1428)
 
 
 Server:
