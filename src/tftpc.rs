@@ -78,7 +78,7 @@ impl Tftpc {
         let mut remote = None;
         for _ in 1 .. 3 {
             sock.send_to(&buf, self.conf.remote)?;
-            remote = self.wait_for_response(&sock, 4, 0);
+            remote = self.wait_for_response(&sock, rtftp::Opcodes::ACK as u16, 0);
             if let Some(_) = remote {
                 break;
             }
@@ -121,7 +121,7 @@ impl Tftpc {
         let mut remote = None;
         for _ in 1 .. 3 {
             sock.send_to(&buf, self.conf.remote)?;
-            remote = self.wait_for_response(&sock, 3, 1);
+            remote = self.wait_for_response(&sock, rtftp::Opcodes::DATA as u16, 1);
             if let Some(_) = remote {
                 break;
             }

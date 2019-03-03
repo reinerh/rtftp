@@ -11,6 +11,16 @@ use std::io;
 use std::io::prelude::*;
 use std::time::Duration;
 
+#[repr(u16)]
+pub enum Opcodes {
+    RRQ   = 0x01,
+    WRQ   = 0x02,
+    DATA  = 0x03,
+    ACK   = 0x04,
+    ERROR = 0x05,
+    OACK  = 0x06,
+}
+
 pub struct TftpOptions {
     blksize: usize,
     timeout: u8,
@@ -63,7 +73,7 @@ impl Tftp {
         let opcode = u16::from_be_bytes([buf[0], buf[1]]);
         let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
 
-        if opcode == 4 && block_nr == expected_block {
+        if opcode == Opcodes::ACK as u16 && block_nr == expected_block {
             return Ok(true)
         }
 
@@ -80,7 +90,7 @@ impl Tftp {
         }
 
         let mut buf = Vec::with_capacity(512);
-        buf.extend([0x00, 0x06].iter());  // opcode
+        buf.extend((Opcodes::OACK as u16).to_be_bytes().iter());
 
         for (key, val) in options {
             buf.extend(key.bytes());
@@ -186,7 +196,8 @@ impl Tftp {
     }
 
     pub fn send_error(&self, socket: &UdpSocket, code: u16, msg: &str) -> Result<(), io::Error> {
-        let mut buf = vec![0x00, 0x05];  // opcode
+        let mut buf = Vec::with_capacity(512);
+        buf.extend((Opcodes::ERROR as u16).to_be_bytes().iter());
         buf.extend(code.to_be_bytes().iter());
         buf.extend(msg.as_bytes());
 
@@ -195,11 +206,11 @@ impl Tftp {
     }
 
     pub fn send_ack(&self, sock: &UdpSocket, block_nr: u16) -> Result<(), io::Error> {
-        let mut buf = vec![0x00, 0x04];  // opcode
+        let mut buf = Vec::with_capacity(4);
+        buf.extend((Opcodes::ACK as u16).to_be_bytes().iter());
         buf.extend(block_nr.to_be_bytes().iter());
 
         sock.send(&buf)?;
-
         Ok(())
     }
 
@@ -218,7 +229,7 @@ impl Tftp {
             };
 
             let mut sendbuf = Vec::with_capacity(4 + len);
-            sendbuf.extend([0x00, 0x03].iter());  // opcode
+            sendbuf.extend((Opcodes::DATA as u16).to_be_bytes().iter());
             sendbuf.extend(block_nr.to_be_bytes().iter());
             sendbuf.extend(filebuf[0..len].iter());
 
@@ -276,7 +287,7 @@ impl Tftp {
             }
 
             let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
-                3 /* DATA */ => (),
+                opc if opc == Opcodes::DATA as u16 => (),
                 _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode")),
             };
             if u16::from_be_bytes([buf[2], buf[3]]) != block_nr {
