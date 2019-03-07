@@ -3,12 +3,12 @@
  * License: GPL-3+
  */
 
-use std::net::{SocketAddr,UdpSocket};
-use std::fs::File;
 use std::collections::HashMap;
-use std::path::{Path,PathBuf};
+use std::fs::File;
 use std::io;
 use std::io::prelude::*;
+use std::net::{SocketAddr, UdpSocket};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[repr(u16)]
@@ -41,7 +41,7 @@ fn default_options() -> TftpOptions {
 
 impl Default for Tftp {
     fn default() -> Tftp {
-        Tftp{
+        Tftp {
             options: default_options(),
         }
     }
@@ -59,7 +59,7 @@ impl Tftp {
             Some(l) => l,
             None => return None,
         };
-        let val = match String::from_utf8(buf[0 .. len].to_vec()) {
+        let val = match String::from_utf8(buf[0..len].to_vec()) {
             Ok(v) => v,
             Err(_) => return None,
         };
@@ -88,7 +88,7 @@ impl Tftp {
         }
 
         let errorcode = u16::from_be_bytes([buf[2], buf[3]]);
-        error = match String::from_utf8(buf[4 ..].to_vec()) {
+        error = match String::from_utf8(buf[4..].to_vec()) {
             Ok(e) => e,
             Err(_) => return std::io::Error::new(kind, error),
         };
@@ -125,9 +125,9 @@ impl Tftp {
         let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
 
         if opcode == Opcodes::ACK as u16 && block_nr == expected_block {
-            return Ok(true)
+            return Ok(true);
         } else if opcode == Opcodes::ERROR as u16 {
-            return Err(self.parse_error(&buf[4 ..]));
+            return Err(self.parse_error(&buf[4..]));
         }
 
         Ok(false)
@@ -139,7 +139,7 @@ impl Tftp {
                 /* it's a WRQ, send normal ack to start transfer */
                 self.send_ack(&sock, 0)?;
             }
-            return Ok(())
+            return Ok(());
         }
 
         let mut buf = Vec::with_capacity(512);
@@ -170,34 +170,28 @@ impl Tftp {
         options.retain(|key, val| {
             let val = val.to_lowercase();
             match key.to_lowercase().as_str() {
-                "blksize" => {
-                    match val.parse() {
-                        Ok(b) if b >= 8 && b <= 65464 => {
-                            self.options.blksize = b;
-                            true
-                        }
-                        _ => false
+                "blksize" => match val.parse() {
+                    Ok(b) if b >= 8 && b <= 65464 => {
+                        self.options.blksize = b;
+                        true
                     }
-                }
-                "timeout" => {
-                    match val.parse() {
-                        Ok(t) if t >= 1 => {
-                            self.options.timeout = t;
-                            true
-                        }
-                        _ => false
+                    _ => false,
+                },
+                "timeout" => match val.parse() {
+                    Ok(t) if t >= 1 => {
+                        self.options.timeout = t;
+                        true
                     }
-                }
-                "tsize" => {
-                    match val.parse() {
-                        Ok(t) => {
-                            self.options.tsize = t;
-                            true
-                        }
-                        _ => false
+                    _ => false,
+                },
+                "tsize" => match val.parse() {
+                    Ok(t) => {
+                        self.options.tsize = t;
+                        true
                     }
-                }
-                _ => false
+                    _ => false,
+                },
+                _ => false,
             }
         });
 
@@ -211,13 +205,13 @@ impl Tftp {
 
         let mut pos = 0;
         loop {
-            let (key, len) = match self.get_tftp_str(&buf[pos ..]) {
+            let (key, len) = match self.get_tftp_str(&buf[pos..]) {
                 Some(args) => args,
                 None => break,
             };
             pos += len + 1;
 
-            let (val, len) = match self.get_tftp_str(&buf[pos ..]) {
+            let (val, len) = match self.get_tftp_str(&buf[pos..]) {
                 Some(args) => args,
                 None => break,
             };
@@ -233,7 +227,7 @@ impl Tftp {
         let dataerr = io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
 
         let mut pos = 0;
-        let (filename, len) = match self.get_tftp_str(&buf[pos ..]) {
+        let (filename, len) = match self.get_tftp_str(&buf[pos..]) {
             Some(args) => args,
             None => return Err(dataerr),
         };
@@ -241,13 +235,13 @@ impl Tftp {
 
         let filename = Path::new(&filename);
 
-        let (mode, len) = match self.get_tftp_str(&buf[pos ..]) {
-            Some((m,l)) => (m.to_lowercase(), l),
+        let (mode, len) = match self.get_tftp_str(&buf[pos..]) {
+            Some((m, l)) => (m.to_lowercase(), l),
             None => return Err(dataerr),
         };
         pos += len + 1;
 
-        let options = self.parse_options(&buf[pos ..]);
+        let options = self.parse_options(&buf[pos..]);
 
         Ok((filename.to_path_buf(), mode, options))
     }
@@ -310,13 +304,13 @@ impl Tftp {
                     Ok(true) => {
                         acked = true;
                         break;
-                    },
+                    }
                     Ok(false) => continue,
                     Err(e) => return Err(e),
                 };
             }
             if !acked {
-                return Err(io::Error::new(io::ErrorKind::TimedOut, "ack timeout"))
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "ack timeout"));
             }
 
             if len < self.options.blksize {
@@ -356,7 +350,7 @@ impl Tftp {
 
             match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
                 opc if opc == Opcodes::DATA as u16 => (),
-                opc if opc == Opcodes::ERROR as u16 => return Err(self.parse_error(&buf[.. len])),
+                opc if opc == Opcodes::ERROR as u16 => return Err(self.parse_error(&buf[..len])),
                 _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode")),
             };
             if u16::from_be_bytes([buf[2], buf[3]]) != block_nr {
@@ -380,5 +374,4 @@ impl Tftp {
 
         Ok(())
     }
-
 }

@@ -3,17 +3,17 @@
  * License: GPL-3+
  */
 
-use std::net::{SocketAddr,UdpSocket};
-use std::fs::OpenOptions;
-use std::fs::File;
-use std::path::{Path,PathBuf};
-use std::error::Error;
 use std::env;
+use std::error::Error;
+use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
+use std::net::{SocketAddr, UdpSocket};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 extern crate nix;
-use nix::unistd::{Gid,Uid,setresgid,setresuid};
+use nix::unistd::{setresgid, setresuid, Gid, Uid};
 
 extern crate getopts;
 use getopts::Options;
@@ -36,7 +36,7 @@ struct Tftpd {
 
 impl Tftpd {
     pub fn new(conf: Configuration) -> Tftpd {
-        Tftpd{
+        Tftpd {
             tftp: rtftp::Tftp::new(),
             conf,
         }
@@ -72,7 +72,6 @@ impl Tftpd {
         }
     }
 
-
     fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(String), io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
         self.tftp.init_tftp_options(&socket, &mut options)?;
@@ -100,7 +99,7 @@ impl Tftpd {
                 let error = format!("Receiving {} from {} failed ({}).", path.display(), cl, err);
                 self.tftp.send_error(&socket, 6, "File already exists")?;
                 return Err(io::Error::new(err.kind(), error));
-            },
+            }
             Err(err) => {
                 let error = format!("Receiving {} from {} failed ({}).", path.display(), cl, err);
                 self.tftp.send_error(&socket, 6, "Permission denied")?;
@@ -146,7 +145,7 @@ impl Tftpd {
                 let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error.to_string());
                 self.tftp.send_error(&socket, 1, "File not found")?;
                 return Err(io::Error::new(io::ErrorKind::NotFound, err));
-            },
+            }
             Err(error) => {
                 let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error.to_string());
                 self.tftp.send_error(&socket, 2, "Permission denied")?;
@@ -184,15 +183,15 @@ impl Tftpd {
                 } else {
                     self.handle_rrq(&socket, &cl, &buf[2..])
                 }
-            },
+            }
             o if o == rtftp::Opcodes::WRQ as u16 => {
                 if self.conf.ro {
                     self.tftp.send_error(&socket, 4, "writing not allowed")?;
                     Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
                 } else {
-                   self.handle_wrq(&socket, &cl, &buf[2..])
+                    self.handle_wrq(&socket, &cl, &buf[2..])
                 }
-            },
+            }
             o if o == rtftp::Opcodes::ERROR as u16 => Ok(format!("Received ERROR from {}", cl)),
             _ => {
                 self.tftp.send_error(&socket, 4, "Unexpected opcode")?;
@@ -207,8 +206,11 @@ impl Tftpd {
         let unpriv_uid = Uid::from_raw(uid);
         let unpriv_gid = Gid::from_raw(gid);
 
-        if Gid::current() != root_gid && Gid::effective() != root_gid
-            && Uid::current() != root_uid && Uid::effective() != root_uid {
+        if Gid::current() != root_gid
+            && Gid::effective() != root_gid
+            && Uid::current() != root_uid
+            && Uid::effective() != root_uid
+        {
             /* already unprivileged user */
             return Ok(());
         }
@@ -263,21 +265,19 @@ impl Tftpd {
                 Err(err) => println!("{}", err),
             }
         }
-
     }
 }
 
 fn usage(opts: Options, program: String, error: Option<String>) {
-    match error {
-        None => {},
-        Some(err) => println!("{}\n", err),
+    if let Some(err) = error {
+        println!("{}\n", err);
     }
     println!("{}", opts.usage(format!("RusTFTP\n\n{} [options]", program).as_str()));
 }
 
 fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     let program = args[0].clone();
-    let mut conf = Configuration{
+    let mut conf = Configuration {
         port: 69,
         uid: 65534,
         gid: 65534,

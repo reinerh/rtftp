@@ -3,11 +3,11 @@
  * License: GPL-3+
  */
 
-use std::net::{SocketAddr,UdpSocket,ToSocketAddrs};
-use std::fs::File;
-use std::path::{Path,PathBuf};
 use std::env;
+use std::fs::File;
 use std::io;
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 extern crate getopts;
@@ -56,9 +56,9 @@ impl Tftpc {
             Err(_) => return None,
         };
 
-        let mut options = self.tftp.parse_options(&buf[2 .. len]);
+        let mut options = self.tftp.parse_options(&buf[2..len]);
         match self.tftp.init_tftp_options(&sock, &mut options) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(_) => return None,
         }
 
@@ -86,7 +86,7 @@ impl Tftpc {
         if opcode == rtftp::Opcodes::ERROR as u16 {
             let mut buf = [0; 512];
             let len = sock.recv(&mut buf)?;
-            return Err(self.tftp.parse_error(&buf[ ..len]));
+            return Err(self.tftp.parse_error(&buf[..len]));
         }
 
         /* first data packet is expected to be block 1 */
@@ -113,7 +113,7 @@ impl Tftpc {
             Some(f) => match f.to_str() {
                 Some(s) => s,
                 None => return Err(err_invalidpath),
-            }
+            },
             None => return Err(err_invalidpath),
         };
         let metadata = match file.metadata() {
@@ -130,7 +130,7 @@ impl Tftpc {
         self.append_option_req(&mut buf, metadata.len());
 
         let mut remote = None;
-        for _ in 1 .. 3 {
+        for _ in 1..3 {
             sock.send_to(&buf, self.conf.remote)?;
             remote = self.wait_for_option_ack(&sock);
             if remote.is_none() {
@@ -153,7 +153,7 @@ impl Tftpc {
                 let error = format!("Sending {} to {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
                 self.tftp.send_error(&sock, 0, "Sending error")?;
                 Err(io::Error::new(err.kind(), error))
-            },
+            }
         }
     }
 
@@ -178,7 +178,7 @@ impl Tftpc {
         self.append_option_req(&mut buf, 0);
 
         let mut remote = None;
-        for _ in 1 .. 3 {
+        for _ in 1..3 {
             sock.send_to(&buf, self.conf.remote)?;
             let oack_remote = self.wait_for_option_ack(&sock);
             if let Some(r) = oack_remote {
@@ -202,7 +202,7 @@ impl Tftpc {
                 let error = format!("Receiving {} from {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
                 self.tftp.send_error(&sock, 0, "Receiving error")?;
                 Err(std::io::Error::new(err.kind(), error))
-            },
+            }
         }
     }
 
@@ -225,9 +225,8 @@ impl Tftpc {
 }
 
 fn usage(opts: Options, program: String, error: Option<String>) {
-    match error {
-        None => {},
-        Some(err) => println!("{}\n", err),
+    if let Some(err) = error {
+        println!("{}\n", err);
     }
     println!("{}", opts.usage(format!("RusTFTP\n\n{} [options] <remote>[:port]", program).as_str()));
 }
@@ -272,15 +271,13 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     let remote_in = matches.free[0].as_str();
     let remote = match remote_in.to_socket_addrs() {
         Ok(mut i) => i.next(),
-        Err(_) => {
-            match (remote_in, 69).to_socket_addrs() {
-                Ok(mut j) => j.next(),
-                Err(_) => {
-                    usage(opts, program, Some("Failed to parse and lookup specified remote".to_string()));
-                    return Err("lookup");
-                },
+        Err(_) => match (remote_in, 69).to_socket_addrs() {
+            Ok(mut j) => j.next(),
+            Err(_) => {
+                usage(opts, program, Some("Failed to parse and lookup specified remote".to_string()));
+                return Err("lookup");
             }
-        }
+        },
     };
 
     blksize = match matches.opt_get_default::<usize>("b", blksize) {
@@ -291,7 +288,7 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
         }
     };
 
-    Ok(Configuration{
+    Ok(Configuration {
         mode: mode.unwrap(),
         filename: filename.unwrap(),
         remote: remote.unwrap(),
