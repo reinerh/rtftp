@@ -39,12 +39,17 @@ fn default_options() -> TftpOptions {
     }
 }
 
-impl Tftp {
-
-    pub fn new() -> Tftp {
+impl Default for Tftp {
+    fn default() -> Tftp {
         Tftp{
             options: default_options(),
         }
+    }
+}
+
+impl Tftp {
+    pub fn new() -> Tftp {
+        Default::default()
     }
 
     fn get_tftp_str(&self, buf: &[u8]) -> Option<(String, usize)> {
@@ -59,7 +64,7 @@ impl Tftp {
             Err(_) => return None,
         };
 
-        return Some((val, len));
+        Some((val, len))
     }
 
     pub fn append_option(&self, buf: &mut Vec<u8>, key: &str, val: &str) {
@@ -99,7 +104,7 @@ impl Tftp {
             _ => std::io::ErrorKind::InvalidData,
         };
 
-        return std::io::Error::new(kind, error);
+        std::io::Error::new(kind, error)
     }
 
     fn wait_for_ack(&self, sock: &UdpSocket, expected_block: u16) -> Result<bool, io::Error> {
@@ -196,9 +201,9 @@ impl Tftp {
             }
         });
 
-        sock.set_read_timeout(Some(Duration::from_secs(self.options.timeout as u64)))?;
+        sock.set_read_timeout(Some(Duration::from_secs(u64::from(self.options.timeout))))?;
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn parse_options(&self, buf: &[u8]) -> HashMap<String, String> {
@@ -221,7 +226,7 @@ impl Tftp {
             options.insert(key, val);
         }
 
-        return options;
+        options
     }
 
     pub fn parse_file_mode_options(&self, buf: &[u8]) -> Result<(PathBuf, String, HashMap<String, String>), io::Error> {
@@ -349,7 +354,7 @@ impl Tftp {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "unexpected size"));
             }
 
-            let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
+            match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
                 opc if opc == Opcodes::DATA as u16 => (),
                 opc if opc == Opcodes::ERROR as u16 => return Err(self.parse_error(&buf[.. len])),
                 _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode")),

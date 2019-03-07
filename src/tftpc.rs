@@ -36,7 +36,7 @@ impl Tftpc {
     pub fn new(conf: Configuration) -> Tftpc {
         Tftpc {
             tftp: rtftp::Tftp::new(),
-            conf: conf,
+            conf,
         }
     }
 
@@ -148,11 +148,11 @@ impl Tftpc {
         }
 
         match self.tftp.send_file(&sock, &mut file) {
-            Ok(_) => return Ok(format!("Sent {} to {}.", self.conf.filename.display(), self.conf.remote)),
+            Ok(_) => Ok(format!("Sent {} to {}.", self.conf.filename.display(), self.conf.remote)),
             Err(err) => {
                 let error = format!("Sending {} to {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
                 self.tftp.send_error(&sock, 0, "Sending error")?;
-                return Err(io::Error::new(err.kind(), error));
+                Err(io::Error::new(err.kind(), error))
             },
         }
     }
@@ -197,11 +197,11 @@ impl Tftpc {
         }
 
         match self.tftp.recv_file(&sock, &mut file) {
-            Ok(_) => return Ok(format!("Received {} from {}.", self.conf.filename.display(), self.conf.remote)),
+            Ok(_) => Ok(format!("Received {} from {}.", self.conf.filename.display(), self.conf.remote)),
             Err(err) => {
                 let error = format!("Receiving {} from {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
                 self.tftp.send_error(&sock, 0, "Receiving error")?;
-                return Err(std::io::Error::new(err.kind(), error));
+                Err(std::io::Error::new(err.kind(), error))
             },
         }
     }
@@ -232,7 +232,7 @@ fn usage(opts: Options, program: String, error: Option<String>) {
     println!("{}", opts.usage(format!("RusTFTP\n\n{} [options] <remote>[:port]", program).as_str()));
 }
 
-fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str> {
+fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     let program = args[0].clone();
     let mut mode = None;
     let mut filename = None;
@@ -255,19 +255,13 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
         return Err("usage");
     }
 
-    match matches.opt_str("g") {
-        Some(f) => {
-            mode = Some(Mode::RRQ);
-            filename = Some(Path::new(&f).to_path_buf());
-        }
-        None => ()
+    if let Some(f) = matches.opt_str("g") {
+        mode = Some(Mode::RRQ);
+        filename = Some(Path::new(&f).to_path_buf());
     }
-    match matches.opt_str("p") {
-        Some(f) => {
-            mode = Some(Mode::WRQ);
-            filename = Some(Path::new(&f).to_path_buf());
-        }
-        None => ()
+    if let Some(f) = matches.opt_str("p") {
+        mode = Some(Mode::WRQ);
+        filename = Some(Path::new(&f).to_path_buf());
     }
 
     if mode.is_none() || (matches.opt_present("g") && matches.opt_present("p")) {
@@ -301,7 +295,7 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
         mode: mode.unwrap(),
         filename: filename.unwrap(),
         remote: remote.unwrap(),
-        blksize: blksize,
+        blksize,
     })
 }
 

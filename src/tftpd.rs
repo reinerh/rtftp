@@ -38,7 +38,7 @@ impl Tftpd {
     pub fn new(conf: Configuration) -> Tftpd {
         Tftpd{
             tftp: rtftp::Tftp::new(),
-            conf: conf,
+            conf,
         }
     }
 
@@ -68,7 +68,7 @@ impl Tftpd {
 
         match path.strip_prefix(cwd) {
             Ok(p) => Some(p.to_path_buf()),
-            Err(_) => return None,
+            Err(_) => None,
         }
     }
 
@@ -110,11 +110,11 @@ impl Tftpd {
 
         self.tftp.ack_options(&socket, &options, false)?;
         match self.tftp.recv_file(&socket, &mut file) {
-            Ok(_) => return Ok(format!("Received {} from {}.", path.display(), cl)),
+            Ok(_) => Ok(format!("Received {} from {}.", path.display(), cl)),
             Err(ref err) => {
                 let error = format!("Receiving {} from {} failed ({}).", path.display(), cl, err);
                 self.tftp.send_error(&socket, 0, "Receiving error")?;
-                return Err(io::Error::new(err.kind(), error));
+                Err(io::Error::new(err.kind(), error))
             }
         }
     }
@@ -163,10 +163,10 @@ impl Tftpd {
         }
         self.tftp.ack_options(&socket, &options, true)?;
         match self.tftp.send_file(&socket, &mut file) {
-            Ok(_) => return Ok(format!("Sent {} to {}.", path.display(), cl)),
+            Ok(_) => Ok(format!("Sent {} to {}.", path.display(), cl)),
             Err(err) => {
                 let error = format!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string());
-                return Err(std::io::Error::new(err.kind(), error));
+                Err(std::io::Error::new(err.kind(), error))
             }
         }
     }
@@ -176,29 +176,29 @@ impl Tftpd {
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
         socket.connect(cl)?;
 
-        let _opcode = match u16::from_be_bytes([buf[0], buf[1]]) {
+        match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
             o if o == rtftp::Opcodes::RRQ as u16 => {
                 if self.conf.wo {
                     self.tftp.send_error(&socket, 4, "reading not allowed")?;
-                    return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
+                    Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
                 } else {
-                    return self.handle_rrq(&socket, &cl, &buf[2..]);
+                    self.handle_rrq(&socket, &cl, &buf[2..])
                 }
             },
             o if o == rtftp::Opcodes::WRQ as u16 => {
                 if self.conf.ro {
                     self.tftp.send_error(&socket, 4, "writing not allowed")?;
-                    return Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"));
+                    Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
                 } else {
-                   return  self.handle_wrq(&socket, &cl, &buf[2..]);
+                   self.handle_wrq(&socket, &cl, &buf[2..])
                 }
             },
-            o if o == rtftp::Opcodes::ERROR as u16 => return Ok(format!("Received ERROR from {}", cl)),
+            o if o == rtftp::Opcodes::ERROR as u16 => Ok(format!("Received ERROR from {}", cl)),
             _ => {
                 self.tftp.send_error(&socket, 4, "Unexpected opcode")?;
-                return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode"));
+                Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode"))
             }
-        };
+        }
     }
 
     fn drop_privs(&self, uid: u32, gid: u32) -> Result<(), Box<Error>> {
@@ -275,7 +275,7 @@ fn usage(opts: Options, program: String, error: Option<String>) {
     println!("{}", opts.usage(format!("RusTFTP\n\n{} [options]", program).as_str()));
 }
 
-fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str> {
+fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     let program = args[0].clone();
     let mut conf = Configuration{
         port: 69,
@@ -342,7 +342,7 @@ fn parse_commandline<'a>(args: &'a Vec<String>) -> Result<Configuration, &'a str
         };
     }
 
-    return Ok(conf);
+    Ok(conf)
 }
 
 fn main() {
