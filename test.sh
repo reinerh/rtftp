@@ -16,6 +16,8 @@ ATFTPD=/usr/sbin/atftpd
 
 TFTPC=/usr/bin/tftp
 
+BUSYBOX=/bin/busybox
+
 CLIENTDIR=$(mktemp -d)
 SERVERDIR=$(mktemp -d)
 
@@ -68,6 +70,22 @@ rtftpc_tx() {
 
 rtftpc_rx() {
 	$RTFTPC -g testfile 127.0.0.1:$PORT 1>/dev/null
+}
+
+busybox_tftpc_tx() {
+	$BUSYBOX tftp -p -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null 2>&1
+}
+
+busybox_tftpc_rx() {
+	$BUSYBOX tftp -g -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null 2>&1
+}
+
+busybox_tftpc_blksize1428_tx() {
+	$BUSYBOX tftp -p -l testfile -r testfile -b 1428 127.0.0.1 $PORT 1>/dev/null 2>&1
+}
+
+busybox_tftpc_blksize1428_rx() {
+	$BUSYBOX tftp -g -l testfile -r testfile -b 1428 127.0.0.1 $PORT 1>/dev/null 2>&1
 }
 
 atftpd_cleanup() {
@@ -123,5 +141,9 @@ if [ -x $ATFTPC ]; then
 fi
 if [ -x $TFTPC ]; then
 	test_transfer tftpc rtftpd
+fi
+if [ -x $BUSYBOX ]; then
+	test_transfer busybox_tftpc rtftpd
+	test_transfer busybox_tftpc_blksize1428 rtftpd
 fi
 
