@@ -24,11 +24,12 @@ pub enum Opcodes {
 pub struct TftpOptions {
     blksize: usize,
     timeout: u8,
-    tsize: usize,
+    tsize: u64,
 }
 
 pub struct Tftp {
     options: TftpOptions,
+    progress_cb: Option<fn(u64, u64, u64) -> u64>,
 }
 
 fn default_options() -> TftpOptions {
@@ -43,6 +44,7 @@ impl Default for Tftp {
     fn default() -> Tftp {
         Tftp {
             options: default_options(),
+            progress_cb: None,
         }
     }
 }
@@ -65,6 +67,17 @@ impl Tftp {
         };
 
         Some((val, len))
+    }
+
+    pub fn set_progress_callback(&mut self, cb: fn(u64, u64, u64) -> u64) {
+        self.progress_cb = Some(cb);
+    }
+
+    fn transfer_size(&self, file: &File) -> u64 {
+        match file.metadata() {
+            Ok(ref m) if m.len() > 0 => m.len(),
+            _ => self.options.tsize,
+        }
     }
 
     pub fn append_option(&self, buf: &mut Vec<u8>, key: &str, val: &str) {
@@ -278,6 +291,9 @@ impl Tftp {
 
     pub fn send_file(&self, socket: &UdpSocket, file: &mut File) -> Result<(), io::Error> {
         let mut block_nr: u16 = 1;
+        let mut transferred = 0;
+        let mut prog_update = 0;
+        let tsize = self.transfer_size(file);
 
         loop {
             let mut filebuf = vec![0; self.options.blksize];
@@ -313,6 +329,11 @@ impl Tftp {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, "ack timeout"));
             }
 
+            transferred += len as u64;
+            if let Some(cb) = self.progress_cb {
+                prog_update = cb(transferred, tsize, prog_update);
+            }
+
             if len < self.options.blksize {
                 /* this was the last block */
                 break;
@@ -326,6 +347,9 @@ impl Tftp {
 
     pub fn recv_file(&self, sock: &UdpSocket, file: &mut File) -> Result<(), io::Error> {
         let mut block_nr: u16 = 1;
+        let mut prog_update = 0;
+        let mut transferred = 0;
+        let tsize = self.transfer_size(file);
 
         loop {
             let mut buf = vec![0; 4 + self.options.blksize + 1]; // +1 for later size check
@@ -361,6 +385,11 @@ impl Tftp {
 
             let databuf = &buf[4..len];
             file.write_all(databuf)?;
+
+            transferred += (len - 4) as u64;
+            if let Some(cb) = self.progress_cb {
+                prog_update = cb(transferred, tsize, prog_update);
+            }
 
             self.send_ack(&sock, block_nr)?;
             block_nr = block_nr.wrapping_add(1);

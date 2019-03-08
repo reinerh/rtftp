@@ -5,7 +5,7 @@
 
 use std::env;
 use std::fs::File;
-use std::io;
+use std::io::{self, Write};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -30,6 +30,26 @@ struct Configuration {
 struct Tftpc {
     tftp: rtftp::Tftp,
     conf: Configuration,
+}
+
+fn update_progress(current: u64, total: u64, last: u64) -> u64 {
+    if total == 0 {
+        /* unknown; remote does not support tsize */
+        return 0;
+    }
+    let onepercent = total / 100;
+    if current < total && current < last + onepercent {
+        /* not enough progress to warrant an update */
+        return last;
+    }
+
+    let percent = 100 * current / total;
+    print!("\r {}% ", percent);
+    io::stdout().flush().expect("flushing stdout failed");
+    if current == total {
+        print!("\r");
+    }
+    current
 }
 
 impl Tftpc {
@@ -207,6 +227,7 @@ impl Tftpc {
     }
 
     pub fn start(&mut self) {
+        self.tftp.set_progress_callback(update_progress);
         let socket = UdpSocket::bind("[::]:0").expect("binding failed");
         socket.set_read_timeout(Some(Duration::from_secs(5))).expect("setting socket timeout failed");
 
