@@ -12,6 +12,7 @@ panic = 'abort'
 [dependencies]
 nix = "0.13.0"
 getopts = "0.2.18"
+threadpool = "1.7.1"
 
 [[bin]]
 name = "rtftpd"

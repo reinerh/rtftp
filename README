@@ -45,6 +45,7 @@ Server:
      -g, --gid GID       group id to run as (default: 65534)
      -r, --read-only     allow only reading/downloading of files (RRQ)
      -w, --write-only    allow only writing/uploading of files (WRQ)
+     -t, --threads N     number of worker threads (default: 2)
 
 
 Notes:

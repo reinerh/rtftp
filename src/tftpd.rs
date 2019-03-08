@@ -18,17 +18,23 @@ use nix::unistd::{setresgid, setresuid, Gid, Uid};
 extern crate getopts;
 use getopts::Options;
 
+extern crate threadpool;
+use threadpool::ThreadPool;
+
 extern crate rtftp;
 
+#[derive(Clone)]
 struct Configuration {
     port: u16,
     uid: u32,
     gid: u32,
     ro: bool,
     wo: bool,
+    threads: usize,
     dir: PathBuf,
 }
 
+#[derive(Clone)]
 struct Tftpd {
     tftp: rtftp::Tftp,
     conf: Configuration,
@@ -250,6 +256,7 @@ impl Tftpd {
             }
         }
 
+        let pool = ThreadPool::new(self.conf.threads);
         loop {
             let mut buf = [0; 2048];
             let (n, src) = match socket.recv_from(&mut buf) {
@@ -260,10 +267,13 @@ impl Tftpd {
                 }
             };
 
-            match self.handle_client(&src, &buf[0..n]) {
-                Ok(msg) => println!("{}", msg),
-                Err(err) => println!("{}", err),
-            }
+            let mut worker = self.clone();
+            pool.execute(move || {
+                match worker.handle_client(&src, &buf[0..n]) {
+                    Ok(msg) => println!("{}", msg),
+                    Err(err) => println!("{}", err),
+                }
+            });
         }
     }
 }
@@ -283,6 +293,7 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
         gid: 65534,
         ro: false,
         wo: false,
+        threads: 2,
         dir: env::current_dir().expect("Can't get current directory"),
     };
     let mut opts = Options::new();
@@ -293,6 +304,7 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     opts.optopt("g", "gid", format!("group id to run as (default: {})", conf.gid).as_ref(), "GID");
     opts.optflag("r", "read-only", "allow only reading/downloading of files (RRQ)");
     opts.optflag("w", "write-only", "allow only writing/uploading of files (WRQ)");
+    opts.optopt("t", "threads", format!("number of worker threads (default: {})", conf.threads).as_ref(), "N");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(err) => {
@@ -305,25 +317,32 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
         return Err("usage");
     }
 
-    conf.port = match matches.opt_get_default::<u16>("p", conf.port) {
+    conf.port = match matches.opt_get_default("p", conf.port) {
         Ok(p) => p,
         Err(err) => {
             usage(opts, program, Some(err.to_string()));
             return Err("port");
         }
     };
-    conf.uid = match matches.opt_get_default::<u32>("u", conf.uid) {
+    conf.uid = match matches.opt_get_default("u", conf.uid) {
         Ok(u) => u,
         Err(err) => {
             usage(opts, program, Some(err.to_string()));
             return Err("uid");
         }
     };
-    conf.gid = match matches.opt_get_default::<u32>("g", conf.gid) {
+    conf.gid = match matches.opt_get_default("g", conf.gid) {
         Ok(g) => g,
         Err(err) => {
             usage(opts, program, Some(err.to_string()));
             return Err("gid");
+        }
+    };
+    conf.threads = match matches.opt_get_default("t", conf.threads) {
+        Ok(t) => t,
+        Err(err) => {
+            usage(opts, program, Some(err.to_string()));
+            return Err("threads");
         }
     };
     conf.ro = matches.opt_present("r");

@@ -21,12 +21,14 @@ pub enum Opcodes {
     OACK  = 0x06,
 }
 
+#[derive(Clone, Copy)]
 pub struct TftpOptions {
     blksize: usize,
     timeout: u8,
     tsize: u64,
 }
 
+#[derive(Clone, Copy)]
 pub struct Tftp {
     options: TftpOptions,
     progress_cb: Option<fn(u64, u64, u64) -> u64>,
