@@ -64,7 +64,7 @@ impl Tftp {
         Default::default()
     }
 
-    fn get_tftp_str(&self, buf: &[u8]) -> Option<(String, usize)> {
+    fn get_tftp_str(&self, buf: &[u8]) -> Option<String> {
         let mut iter = buf.iter();
 
         let len = match iter.position(|&x| x == 0) {
@@ -76,7 +76,7 @@ impl Tftp {
             Err(_) => return None,
         };
 
-        Some((val, len))
+        Some(val)
     }
 
     pub fn set_progress_callback(&mut self, cb: ProgressCallback) {
@@ -228,17 +228,17 @@ impl Tftp {
 
         let mut pos = 0;
         loop {
-            let (key, len) = match self.get_tftp_str(&buf[pos..]) {
-                Some(args) => args,
+            let key = match self.get_tftp_str(&buf[pos..]) {
+                Some(k) => k,
                 None => break,
             };
-            pos += len + 1;
+            pos += key.len() + 1;
 
-            let (val, len) = match self.get_tftp_str(&buf[pos..]) {
-                Some(args) => args,
+            let val = match self.get_tftp_str(&buf[pos..]) {
+                Some(v) => v,
                 None => break,
             };
-            pos += len + 1;
+            pos += val.len() + 1;
 
             options.insert(key, val);
         }
@@ -250,19 +250,19 @@ impl Tftp {
         let dataerr = io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
 
         let mut pos = 0;
-        let (filename, len) = match self.get_tftp_str(&buf[pos..]) {
-            Some(args) => args,
+        let filename = match self.get_tftp_str(&buf[pos..]) {
+            Some(f) => f,
             None => return Err(dataerr),
         };
-        pos += len + 1;
+        pos += filename.len() + 1;
 
         let filename = Path::new(&filename);
 
-        let (mode, len) = match self.get_tftp_str(&buf[pos..]) {
-            Some((m, l)) => (m.to_lowercase(), l),
+        let mode = match self.get_tftp_str(&buf[pos..]) {
+            Some(m) => m.to_lowercase(),
             None => return Err(dataerr),
         };
-        pos += len + 1;
+        pos += mode.len() + 1;
 
         let options = self.parse_options(&buf[pos..]);
 
