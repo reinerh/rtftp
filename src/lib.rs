@@ -11,6 +11,8 @@ use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+pub static VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
+
 #[repr(u16)]
 pub enum Opcodes {
     RRQ   = 0x01,

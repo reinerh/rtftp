@@ -282,7 +282,8 @@ fn usage(opts: Options, program: String, error: Option<String>) {
     if let Some(err) = error {
         println!("{}\n", err);
     }
-    println!("{}", opts.usage(format!("RusTFTP\n\n{} [options]", program).as_str()));
+    let version = rtftp::VERSION.unwrap_or("");
+    println!("{}", opts.usage(format!("RusTFTP {}\n\n{} [options]", version, program).as_str()));
 }
 
 fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
