@@ -13,6 +13,12 @@ use std::time::Duration;
 
 pub static VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
+/// * `cur` - current number of bytes
+/// * `total` - total number of bytes; 0 if unknown
+/// * `state` - state that was returned in previous call
+/// Returns state that should get passed in next invocation
+type ProgressCallback = fn(cur: u64, total: u64, state: u64) -> u64;
+
 #[repr(u16)]
 pub enum Opcodes {
     RRQ   = 0x01,
@@ -33,7 +39,7 @@ pub struct TftpOptions {
 #[derive(Clone, Copy)]
 pub struct Tftp {
     options: TftpOptions,
-    progress_cb: Option<fn(u64, u64, u64) -> u64>,
+    progress_cb: Option<ProgressCallback>,
 }
 
 fn default_options() -> TftpOptions {
@@ -73,7 +79,7 @@ impl Tftp {
         Some((val, len))
     }
 
-    pub fn set_progress_callback(&mut self, cb: fn(u64, u64, u64) -> u64) {
+    pub fn set_progress_callback(&mut self, cb: ProgressCallback) {
         self.progress_cb = Some(cb);
     }
 
