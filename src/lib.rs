@@ -414,3 +414,82 @@ impl Tftp {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_tftp_str() {
+        let tftp = Tftp::new();
+
+        let mut buf = Vec::with_capacity(100);
+        assert_eq!(tftp.get_tftp_str(&buf), None);
+
+        buf.extend("key".bytes());
+        assert_eq!(tftp.get_tftp_str(&buf), None);
+
+        buf.push(0x00);
+        buf.extend("value".bytes());
+        buf.push(0x00);
+        /* empty option */
+        buf.push(0x00);
+
+        let mut pos = 0;
+        let val = tftp.get_tftp_str(&buf).unwrap();
+        assert_eq!(val, "key");
+        pos += val.len() + 1;
+        let val = tftp.get_tftp_str(&buf[pos..]).unwrap();
+        assert_eq!(val, "value");
+        pos += val.len() + 1;
+        let val = tftp.get_tftp_str(&buf[pos..]).unwrap();
+        assert_eq!(val, "");
+    }
+
+    #[test]
+    fn test_parse_options() {
+        let tftp = Tftp::new();
+
+        let mut buf = Vec::with_capacity(100);
+        let opts = tftp.parse_options(&buf);
+        assert_eq!(opts.len(), 0);
+
+        buf.extend("blksize\x001234\x00tsize\x000\x00incomplete".bytes());
+        let opts = tftp.parse_options(&buf);
+        assert_eq!(opts.len(), 2);
+        assert_eq!(opts["blksize"], "1234");
+        assert_eq!(opts["tsize"], "0");
+        assert_eq!(opts.contains_key("incomplete"), false);
+    }
+
+    #[test]
+    fn test_parse_file_mode_options() {
+        let tftp = Tftp::new();
+
+        let mut buf = Vec::with_capacity(100);
+        assert_eq!(tftp.parse_file_mode_options(&buf).is_err(), true);
+        buf.extend("FileName\x00".bytes());
+        assert_eq!(tftp.parse_file_mode_options(&buf).is_err(), true);
+        buf.extend("NetASCII\x00".bytes());
+        let (filename, mode, opts) = tftp.parse_file_mode_options(&buf).unwrap();
+        assert_eq!(filename, PathBuf::from("FileName"));
+        assert_eq!(mode, "netascii");
+        assert_eq!(opts.len(), 0);
+
+        buf.extend("blksize\x001024\x00".bytes());
+        let (filename, mode, opts) = tftp.parse_file_mode_options(&buf).unwrap();
+        assert_eq!(filename, PathBuf::from("FileName"));
+        assert_eq!(mode, "netascii");
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts["blksize"], "1024");
+    }
+
+    #[test]
+    fn test_append_option() {
+        let tftp = Tftp::new();
+
+        let mut buf = Vec::with_capacity(100);
+        tftp.append_option(&mut buf, "key", "value");
+        assert_eq!(buf, "key\x00value\x00".as_bytes());
+    }
+}
