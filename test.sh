@@ -132,6 +132,8 @@ fi
 
 cd "$CLIENTDIR"
 
+test_transfer rtftpc rtftpd
+
 if [ -x $ATFTPD ]; then
 	test_transfer rtftpc atftpd
 fi
