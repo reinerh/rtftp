@@ -64,7 +64,7 @@ impl Tftpd {
 
     fn file_allowed(&self, filename: &Path) -> Option<PathBuf> {
         /* get parent to check dir where file should be read/written */
-        let path = Path::new(".").join(filename);
+        let path = self.conf.dir.join(filename);
         let path = match path.parent() {
             Some(p) => p,
             None => return None,
@@ -81,14 +81,9 @@ impl Tftpd {
         };
         let path = path.join(filename);
 
-        let cwd = match env::current_dir() {
-            Ok(p) => p,
-            Err(_) => return None,
-        };
-
-        match path.strip_prefix(cwd) {
-            Ok(p) => Some(p.to_path_buf()),
-            Err(_) => None,
+        match path.strip_prefix(&self.conf.dir) {
+            Ok(p) if p != PathBuf::new() => Some(p.to_path_buf()),
+            _ => None,
         }
     }
 
@@ -379,4 +374,33 @@ fn main() {
     };
 
     Tftpd::new(conf).start();
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_file_allowed() {
+        let conf: Configuration = Default::default();
+        let tftpd = Tftpd::new(conf);
+
+        /* allowed */
+        assert!(tftpd.file_allowed(Path::new("testfile")).is_some());
+        assert!(tftpd.file_allowed(&tftpd.conf.dir.join(Path::new("testfile"))).is_some());
+
+        /* forbidden */
+        assert!(tftpd.file_allowed(Path::new("nonexisting_dir/testfile")).is_none());
+        assert!(tftpd.file_allowed(Path::new("/nonexisting_dir/testfile")).is_none());
+        assert!(tftpd.file_allowed(Path::new("../testfile")).is_none());
+        assert!(tftpd.file_allowed(Path::new("testfile/../")).is_none());
+        assert!(tftpd.file_allowed(Path::new("testfile/../testfile")).is_none());
+        assert!(tftpd.file_allowed(Path::new("/root/testfile")).is_none());
+        assert!(tftpd.file_allowed(Path::new("/testfile")).is_none());
+        assert!(tftpd.file_allowed(Path::new("/dev/null")).is_none());
+        assert!(tftpd.file_allowed(Path::new("../../../../../../../../../../../../../etc/motd")).is_none());
+        assert!(tftpd.file_allowed(Path::new("")).is_none());
+        assert!(tftpd.file_allowed(Path::new("./")).is_none());
+        assert!(tftpd.file_allowed(&tftpd.conf.dir).is_none());
+    }
 }
