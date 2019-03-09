@@ -34,6 +34,20 @@ struct Configuration {
     dir: PathBuf,
 }
 
+impl Default for Configuration {
+    fn default() -> Configuration {
+        Configuration {
+            port: 69,
+            uid: 65534,
+            gid: 65534,
+            ro: false,
+            wo: false,
+            threads: 2,
+            dir: env::current_dir().expect("Can't get current directory"),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Tftpd {
     tftp: rtftp::Tftp,
@@ -288,15 +302,7 @@ fn usage(opts: Options, program: String, error: Option<String>) {
 
 fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     let program = args[0].clone();
-    let mut conf = Configuration {
-        port: 69,
-        uid: 65534,
-        gid: 65534,
-        ro: false,
-        wo: false,
-        threads: 2,
-        dir: env::current_dir().expect("Can't get current directory"),
-    };
+    let mut conf: Configuration = Default::default();
     let mut opts = Options::new();
     opts.optflag("h", "help", "display usage information");
     opts.optopt("d", "directory", "directory to serve (default: current directory)", "DIRECTORY");
