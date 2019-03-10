@@ -5,7 +5,7 @@ written in Rust.
 
 
 Currently supported:
-- RFC 1350 (TFTP revision 2; except 'netascii' mode)
+- RFC 1350 (TFTP revision 2)
 - RFC 2347 (Option Extension)
 - RFC 2348 (Blocksize Option)
 - RFC 2349 (Timeout Interval and Transfer Size Options)
@@ -27,6 +27,7 @@ Client:
      -g, --get FILE      download file from remote server
      -p, --put FILE      upload file to remote server
      -b, --blksize SIZE  negotiate a different block size (default: 1428)
+     -n, --netascii      use netascii mode (instead of octet)
 
 
 Server:

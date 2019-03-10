@@ -15,13 +15,14 @@ use getopts::Options;
 
 extern crate rtftp;
 
-enum Mode {
+enum Operation {
     RRQ,
     WRQ,
 }
 
 struct Configuration {
-    mode: Mode,
+    operation: Operation,
+    mode: rtftp::Mode,
     filename: PathBuf,
     remote: SocketAddr,
     blksize: usize,
@@ -46,7 +47,7 @@ fn update_progress(current: u64, total: u64, last: u64) -> u64 {
     let percent = 100 * current / total;
     print!("\r {}% ", percent);
     io::stdout().flush().expect("flushing stdout failed");
-    if current == total {
+    if current >= total {
         print!("\r");
     }
     current
@@ -54,8 +55,10 @@ fn update_progress(current: u64, total: u64, last: u64) -> u64 {
 
 impl Tftpc {
     pub fn new(conf: Configuration) -> Tftpc {
+        let mut tftp = rtftp::Tftp::new();
+        tftp.set_mode(conf.mode);
         Tftpc {
-            tftp: rtftp::Tftp::new(),
+            tftp,
             conf,
         }
     }
@@ -67,7 +70,7 @@ impl Tftpc {
             Err(_) => return None,
         };
         let opcode = u16::from_be_bytes([buf[0], buf[1]]);
-        if opcode != rtftp::Opcodes::OACK as u16 {
+        if opcode != rtftp::Opcode::OACK as u16 {
             return None;
         }
 
@@ -85,7 +88,7 @@ impl Tftpc {
         Some(remote)
     }
 
-    fn wait_for_response(&self, sock: &UdpSocket, expected_opcode: rtftp::Opcodes, expected_block: u16, expected_remote: Option<SocketAddr>) -> Result<Option<SocketAddr>, std::io::Error> {
+    fn wait_for_response(&self, sock: &UdpSocket, expected_opcode: rtftp::Opcode, expected_block: u16, expected_remote: Option<SocketAddr>) -> Result<Option<SocketAddr>, std::io::Error> {
         let mut buf = [0; 4];
         let (len, remote) = match sock.peek_from(&mut buf) {
             Ok(args) => args,
@@ -103,7 +106,7 @@ impl Tftpc {
         let opcode = u16::from_be_bytes([buf[0], buf[1]]);
         let block_nr = u16::from_be_bytes([buf[2], buf[3]]);
 
-        if opcode == rtftp::Opcodes::ERROR as u16 {
+        if opcode == rtftp::Opcode::ERROR as u16 {
             let mut buf = [0; 512];
             let len = sock.recv(&mut buf)?;
             return Err(self.tftp.parse_error(&buf[..len]));
@@ -121,6 +124,19 @@ impl Tftpc {
         self.tftp.append_option(buf, "blksize", &format!("{}", self.conf.blksize));
         self.tftp.append_option(buf, "timeout", &format!("{}", 3));
         self.tftp.append_option(buf, "tsize", &format!("{}", fsize));
+    }
+
+    fn init_req(&self, opcode: rtftp::Opcode, filename: &str, size: u64) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(512);
+        buf.extend((opcode as u16).to_be_bytes().iter());
+        let mode_str = match self.conf.mode {
+            rtftp::Mode::OCTET => "octet",
+            rtftp::Mode::NETASCII => "netascii",
+        };
+        self.tftp.append_option(&mut buf, filename, mode_str);
+        self.append_option_req(&mut buf, size);
+
+        buf
     }
 
     fn handle_wrq(&mut self, sock: &UdpSocket) -> Result<String, io::Error> {
@@ -144,10 +160,8 @@ impl Tftpc {
             return Err(err_invalidpath);
         }
 
-        let mut buf = Vec::with_capacity(512);
-        buf.extend((rtftp::Opcodes::WRQ as u16).to_be_bytes().iter());
-        self.tftp.append_option(&mut buf, filename, "octet");
-        self.append_option_req(&mut buf, metadata.len());
+        let tsize = self.tftp.transfersize(&mut file)?;
+        let buf = self.init_req(rtftp::Opcode::WRQ, filename, tsize);
 
         let mut remote = None;
         for _ in 1..3 {
@@ -155,7 +169,7 @@ impl Tftpc {
             remote = self.wait_for_option_ack(&sock);
             if remote.is_none() {
                 /* for WRQ either OACK or ACK is replied */
-                remote = self.wait_for_response(&sock, rtftp::Opcodes::ACK, 0, None)?;
+                remote = self.wait_for_response(&sock, rtftp::Opcode::ACK, 0, None)?;
             }
             if remote.is_some() {
                 break;
@@ -192,10 +206,7 @@ impl Tftpc {
             None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
         };
 
-        let mut buf = Vec::with_capacity(512);
-        buf.extend((rtftp::Opcodes::RRQ as u16).to_be_bytes().iter());
-        self.tftp.append_option(&mut buf, filename, "octet");
-        self.append_option_req(&mut buf, 0);
+        let buf = self.init_req(rtftp::Opcode::RRQ, filename, 0);
 
         let mut remote = None;
         for _ in 1..3 {
@@ -205,7 +216,7 @@ impl Tftpc {
                 /* for RRQ the received OACKs need to be acked */
                 self.tftp.send_ack_to(&sock, r, 0)?;
             }
-            remote = self.wait_for_response(&sock, rtftp::Opcodes::DATA, 1, oack_remote)?;
+            remote = self.wait_for_response(&sock, rtftp::Opcode::DATA, 1, oack_remote)?;
             if remote.is_some() {
                 break;
             }
@@ -231,9 +242,9 @@ impl Tftpc {
         let socket = UdpSocket::bind("[::]:0").expect("binding failed");
         socket.set_read_timeout(Some(Duration::from_secs(5))).expect("setting socket timeout failed");
 
-        let err = match self.conf.mode {
-            Mode::RRQ => self.handle_rrq(&socket),
-            Mode::WRQ => self.handle_wrq(&socket),
+        let err = match self.conf.operation {
+            Operation::RRQ => self.handle_rrq(&socket),
+            Operation::WRQ => self.handle_wrq(&socket),
         };
         match err {
             Ok(msg) => println!("{}", msg),
@@ -255,7 +266,8 @@ fn usage(opts: Options, program: String, error: Option<String>) {
 
 fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     let program = args[0].clone();
-    let mut mode = None;
+    let mut operation = None;
+    let mut mode = rtftp::Mode::OCTET;
     let mut filename = None;
     let mut blksize = 1428;
 
@@ -264,6 +276,7 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     opts.optopt("g", "get", "download file from remote server", "FILE");
     opts.optopt("p", "put", "upload file to remote server", "FILE");
     opts.optopt("b", "blksize", format!("negotiate a different block size (default: {})", blksize).as_ref(), "SIZE");
+    opts.optflag("n", "netascii","use netascii mode (instead of octet)");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(err) => {
@@ -277,17 +290,21 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     }
 
     if let Some(f) = matches.opt_str("g") {
-        mode = Some(Mode::RRQ);
+        operation = Some(Operation::RRQ);
         filename = Some(Path::new(&f).to_path_buf());
     }
     if let Some(f) = matches.opt_str("p") {
-        mode = Some(Mode::WRQ);
+        operation = Some(Operation::WRQ);
         filename = Some(Path::new(&f).to_path_buf());
     }
 
-    if mode.is_none() || (matches.opt_present("g") && matches.opt_present("p")) {
+    if operation.is_none() || (matches.opt_present("g") && matches.opt_present("p")) {
         usage(opts, program, Some("Exactly one of g (get) and p (put) required".to_string()));
         return Err("get put");
+    }
+
+    if matches.opt_present("n") {
+        mode = rtftp::Mode::NETASCII;
     }
 
     let remote_in = matches.free[0].as_str();
@@ -311,7 +328,8 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     };
 
     Ok(Configuration {
-        mode: mode.unwrap(),
+        operation: operation.unwrap(),
+        mode,
         filename: filename.unwrap(),
         remote: remote.unwrap(),
         blksize,

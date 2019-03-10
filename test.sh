@@ -38,10 +38,11 @@ atftpd() {
 
 atftpc() {
 	[ $TX -eq 1 ] && op="-p" || op="-g"
+	[ -n "$NETASCII" ] && opts="--mode netascii"
 	if [ -n "$BLKSIZE" ]; then
-		$ATFTPC $op -l testfile -r testfile --option "blksize $BLKSIZE" 127.0.0.1 $PORT 1>/dev/null 2>&1
+		$ATFTPC $op -l testfile -r testfile $opts --option "blksize $BLKSIZE" 127.0.0.1 $PORT 1>/dev/null 2>&1
 	else
-		$ATFTPC $op -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null
+		$ATFTPC $op -l testfile -r testfile $opts 127.0.0.1 $PORT 1>/dev/null
 	fi
 }
 
@@ -57,6 +58,7 @@ rtftpd() {
 rtftpc() {
 	[ $TX -eq 1 ] && op="-p" || op="-g"
 	[ -n "$BLKSIZE" ] && opts="--blksize $BLKSIZE"
+	[ -n "$NETASCII" ] && opts="$opts -n"
 	$RTFTPC $op testfile $opts 127.0.0.1:$PORT 1>/dev/null
 }
 
@@ -106,9 +108,8 @@ test_transfer() {
 
 trap cleanup 0 1 2
 
-if [ ! -x "$RTFTPC" ] || [ ! -x "$RTFTPD" ]; then
-	cargo build --release
-fi
+# make sure binaries are up-to-date
+cargo build --release
 
 cd "$CLIENTDIR"
 
@@ -121,6 +122,14 @@ test_transfer rtftpc rtftpd
 [ -x $TFTPC ]   && test_transfer tftpc rtftpd
 [ -x $BUSYBOX ] && test_transfer busybox_tftpc rtftpd
 
+# with netascii mode
+printf "\\n\\nTesting netascii transfers\\n"
+NETASCII=1
+test_transfer rtftpc rtftpd
+[ -x $ATFTPD ] && test_transfer rtftpc atftpd
+[ -x $ATFTPC ] && test_transfer atftpc rtftpd
+unset NETASCII
+
 # different block size
 printf "\\n\\nTesting larger block sizes\\n"
 BLKSIZE=1500
@@ -130,3 +139,11 @@ test_transfer rtftpc rtftpd
 [ -x $BUSYBOX ] && test_transfer busybox_tftpc rtftpd
 unset BLKSIZE
 
+# blocksize and netascii
+printf "\\n\\nTesting larger block sizes and netascii\\n"
+BLKSIZE=1500
+NETASCII=1
+test_transfer rtftpc rtftpd
+[ -x $ATFTPD ] && test_transfer rtftpc atftpd
+[ -x $ATFTPC ] && test_transfer atftpc rtftpd
+unset NETASCII

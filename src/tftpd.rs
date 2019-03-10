@@ -92,7 +92,8 @@ impl Tftpd {
         self.tftp.init_tftp_options(&socket, &mut options)?;
 
         match mode.as_ref() {
-            "octet" => (),
+            "octet" => self.tftp.set_mode(rtftp::Mode::OCTET),
+            "netascii" => self.tftp.set_mode(rtftp::Mode::NETASCII),
             _ => {
                 self.tftp.send_error(&socket, 0, "Unsupported mode")?;
                 return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
@@ -138,7 +139,8 @@ impl Tftpd {
         self.tftp.init_tftp_options(&socket, &mut options)?;
 
         match mode.as_ref() {
-            "octet" => (),
+            "octet" => self.tftp.set_mode(rtftp::Mode::OCTET),
+            "netascii" => self.tftp.set_mode(rtftp::Mode::NETASCII),
             _ => {
                 self.tftp.send_error(&socket, 0, "Unsupported mode")?;
                 return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
@@ -173,7 +175,7 @@ impl Tftpd {
         }
 
         if let Some(opt) = options.get_mut("tsize") {
-            *opt = file.metadata()?.len().to_string();
+            *opt = self.tftp.transfersize(&mut file)?.to_string();
         }
         self.tftp.ack_options(&socket, &options, true)?;
         match self.tftp.send_file(&socket, &mut file) {
@@ -191,7 +193,7 @@ impl Tftpd {
         socket.connect(cl)?;
 
         match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
-            o if o == rtftp::Opcodes::RRQ as u16 => {
+            o if o == rtftp::Opcode::RRQ as u16 => {
                 if self.conf.wo {
                     self.tftp.send_error(&socket, 4, "reading not allowed")?;
                     Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
@@ -199,7 +201,7 @@ impl Tftpd {
                     self.handle_rrq(&socket, &cl, &buf[2..])
                 }
             }
-            o if o == rtftp::Opcodes::WRQ as u16 => {
+            o if o == rtftp::Opcode::WRQ as u16 => {
                 if self.conf.ro {
                     self.tftp.send_error(&socket, 4, "writing not allowed")?;
                     Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
@@ -207,7 +209,7 @@ impl Tftpd {
                     self.handle_wrq(&socket, &cl, &buf[2..])
                 }
             }
-            o if o == rtftp::Opcodes::ERROR as u16 => Ok(format!("Received ERROR from {}", cl)),
+            o if o == rtftp::Opcode::ERROR as u16 => Ok(format!("Received ERROR from {}", cl)),
             _ => {
                 self.tftp.send_error(&socket, 4, "Unexpected opcode")?;
                 Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode"))
