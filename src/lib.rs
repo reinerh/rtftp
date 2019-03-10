@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
+use std::io::{self, BufReader};
 use std::io::prelude::*;
 use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
@@ -114,10 +114,11 @@ impl Tftp {
             Mode::NETASCII => {},
         }
 
+        let mut reader = BufReader::new(file);
         let mut total_size = 0;
         loop {
             let mut buf = [0; 4096];
-            let size = match file.read(&mut buf) {
+            let size = match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(s) => s,
                 Err(ref err) if err.kind() == io::ErrorKind::Interrupted => continue,
@@ -129,8 +130,8 @@ impl Tftp {
                                       .filter(|&x| *x == b'\r' || *x == b'\n')
                                       .count() as u64;
         }
+        reader.seek(io::SeekFrom::Start(0))?;
 
-        file.seek(io::SeekFrom::Start(0))?;
         Ok(total_size)
     }
 
@@ -151,6 +152,40 @@ impl Tftp {
         };
 
         Some(val)
+    }
+
+    /// Read::read can possibly return less bytes than the requested buffer size,
+    /// which can for example be observed when using a BufReader.
+    /// Read::read_exact does not work well with EOF, as the content of the buffer
+    /// will be undefined if less bytes can be read than would fit into the buffer.
+    ///
+    /// This function will always fill the buffer completely (like expected from
+    /// read_exact), but also works with EOF, by filling the buffer partially and
+    /// returning the amount of bytes read.
+    fn read_exact(&self, reader: &mut Read, buf: &mut [u8]) -> Result<usize, io::Error> {
+        let maxlen = buf.len();
+        let mut outbuf = Vec::with_capacity(maxlen);
+        let mut len = 0;
+        loop {
+            let mut readbuf = vec![0; maxlen - len];
+            len += match reader.read(&mut readbuf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    outbuf.extend(readbuf[0..n].iter());
+                    n
+                },
+                Err(ref error) if error.kind() == io::ErrorKind::Interrupted => continue, /* retry */
+                Err(err) => return Err(err),
+            };
+            if len == maxlen {
+                break;
+            }
+        }
+        /* needed to that copying into buf works (needs to be same size) */
+        outbuf.resize(maxlen, 0);
+
+        buf.copy_from_slice(&outbuf);
+        Ok(len)
     }
 
     pub fn set_progress_callback(&mut self, cb: ProgressCallback) {
@@ -382,11 +417,11 @@ impl Tftp {
         /* holds bytes from netascii conversion that did not fit in tx buffer */
         let mut overflow = Vec::with_capacity(2 * self.options.blksize);
 
+        let mut reader = BufReader::new(file);
         loop {
             let mut filebuf = vec![0; self.options.blksize - overflow.len()];
-            let mut len = match file.read(&mut filebuf) {
+            let mut len = match self.read_exact(&mut reader, &mut filebuf) {
                 Ok(n) => n,
-                Err(ref error) if error.kind() == io::ErrorKind::Interrupted => continue, /* retry */
                 Err(err) => {
                     self.send_error(&socket, 0, "File reading error")?;
                     return Err(err);

@@ -103,7 +103,7 @@ impl Tftpd {
         let path = match self.file_allowed(&filename) {
             Some(p) => p,
             None => {
-                let err = format!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
+                let err = format!("Receiving {} from {} failed (permission check failed).", filename.display(), cl);
                 self.tftp.send_error(&socket, 2, "Permission denied")?;
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
             }
