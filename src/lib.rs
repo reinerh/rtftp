@@ -513,7 +513,7 @@ impl Tftp {
 
         if netascii_state {
             /* the file ended with an incomplete \r encoding */
-            file.write(&[b'\r'])?;
+            file.write_all(&[b'\r'])?;
         }
 
         file.flush()?;
