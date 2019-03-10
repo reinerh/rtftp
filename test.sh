@@ -36,56 +36,34 @@ atftpd() {
 	$ATFTPD --port $PORT --user "$USER" --group "$GROUP" --daemon "$SERVERDIR"
 }
 
-atftpc_tx() {
-	$ATFTPC -p -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null
+atftpc() {
+	[ $TX -eq 1 ] && op="-p" || op="-g"
+	if [ -n "$BLKSIZE" ]; then
+		$ATFTPC $op -l testfile -r testfile --option "blksize $BLKSIZE" 127.0.0.1 $PORT 1>/dev/null 2>&1
+	else
+		$ATFTPC $op -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null
+	fi
 }
 
-atftpc_rx() {
-	$ATFTPC -g -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null
-}
-
-atftpc_blksize1428_tx() {
-	$ATFTPC -p -l testfile -r testfile --option "blksize 1428" 127.0.0.1 $PORT 1>/dev/null 2>&1
-}
-
-atftpc_blksize1428_rx() {
-	$ATFTPC -g -l testfile -r testfile --option "blksize 1428" 127.0.0.1 $PORT 1>/dev/null 2>&1
-}
-
-tftpc_tx() {
-	printf "connect 127.0.0.1 %d\\nmode binary\\nput testfile\\n" $PORT | $TFTPC 1>/dev/null
-}
-
-tftpc_rx() {
-	printf "connect 127.0.0.1 %d\\nmode binary\\nget testfile\\n" $PORT | $TFTPC 1>/dev/null
+tftpc() {
+	[ $TX -eq 1 ] && op="put" || op="get"
+	printf "connect 127.0.0.1 $PORT\\nmode binary\\n$op testfile\\n" | $TFTPC 1>/dev/null
 }
 
 rtftpd() {
 	$SSD --background --exec "$RTFTPD" --start -- -p $PORT -d "$SERVERDIR" 1>/dev/null
 }
 
-rtftpc_tx() {
-	$RTFTPC -p testfile 127.0.0.1:$PORT 1>/dev/null
+rtftpc() {
+	[ $TX -eq 1 ] && op="-p" || op="-g"
+	[ -n "$BLKSIZE" ] && opts="--blksize $BLKSIZE"
+	$RTFTPC $op testfile $opts 127.0.0.1:$PORT 1>/dev/null
 }
 
-rtftpc_rx() {
-	$RTFTPC -g testfile 127.0.0.1:$PORT 1>/dev/null
-}
-
-busybox_tftpc_tx() {
-	$BUSYBOX tftp -p -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null 2>&1
-}
-
-busybox_tftpc_rx() {
-	$BUSYBOX tftp -g -l testfile -r testfile 127.0.0.1 $PORT 1>/dev/null 2>&1
-}
-
-busybox_tftpc_blksize1428_tx() {
-	$BUSYBOX tftp -p -l testfile -r testfile -b 1428 127.0.0.1 $PORT 1>/dev/null 2>&1
-}
-
-busybox_tftpc_blksize1428_rx() {
-	$BUSYBOX tftp -g -l testfile -r testfile -b 1428 127.0.0.1 $PORT 1>/dev/null 2>&1
+busybox_tftpc() {
+	[ $TX -eq 1 ] && op="-p" || op="-g"
+	[ -n "$BLKSIZE" ] && opts="-b $BLKSIZE"
+	$BUSYBOX tftp $op -l testfile -r testfile $opts 127.0.0.1 $PORT 1>/dev/null 2>&1
 }
 
 atftpd_cleanup() {
@@ -106,16 +84,18 @@ test_transfer() {
 	dd if=/dev/urandom of="$CLIENTDIR/testfile" bs=1M count=100 2>/dev/null
 
 	time (
-		printf "%s TX (to %s): " $client $server
-		${client}_tx
+		printf "$client TX (to $server): "
+		TX=1
+		${client}
 		compare_files
 		printf "ok"
 	)
 	rm -f "$CLIENTDIR/testfile"
 
 	time (
-		printf "%s RX (from %s): " $client $server
-		${client}_rx
+		printf "$client RX (from $server): "
+		TX=0
+		${client}
 		compare_files
 		printf "ok"
 	)
@@ -132,20 +112,21 @@ fi
 
 cd "$CLIENTDIR"
 
-test_transfer rtftpc rtftpd
 
-if [ -x $ATFTPD ]; then
-	test_transfer rtftpc atftpd
-fi
-if [ -x $ATFTPC ]; then
-	test_transfer atftpc rtftpd
-	test_transfer atftpc_blksize1428 rtftpd
-fi
-if [ -x $TFTPC ]; then
-	test_transfer tftpc rtftpd
-fi
-if [ -x $BUSYBOX ]; then
-	test_transfer busybox_tftpc rtftpd
-	test_transfer busybox_tftpc_blksize1428 rtftpd
-fi
+# Defaults
+printf "Testing with default configuration\\n"
+test_transfer rtftpc rtftpd
+[ -x $ATFTPD ]  && test_transfer rtftpc atftpd
+[ -x $ATFTPC ]  && test_transfer atftpc rtftpd
+[ -x $TFTPC ]   && test_transfer tftpc rtftpd
+[ -x $BUSYBOX ] && test_transfer busybox_tftpc rtftpd
+
+# different block size
+printf "\\n\\nTesting larger block sizes\\n"
+BLKSIZE=1500
+test_transfer rtftpc rtftpd
+[ -x $ATFTPD ]  && test_transfer rtftpc atftpd
+[ -x $ATFTPC ]  && test_transfer atftpc rtftpd
+[ -x $BUSYBOX ] && test_transfer busybox_tftpc rtftpd
+unset BLKSIZE
 
