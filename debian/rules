@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+#export DH_VERBOSE=1
+
+TARGET=x86_64-unknown-linux-musl
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --target $(TARGET)
+
+override_dh_auto_clean:
+	cargo clean
+	dh_auto_clean
+
+override_dh_dwz:
+	dh_dwz --no-dwz-multifile
+
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym

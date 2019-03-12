@@ -1,0 +1,2 @@
+target/*/release/rtftpc usr/bin
+target/*/release/rtftpd usr/bin
