@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 extern crate nix;
-use nix::unistd::{setresgid, setresuid, Gid, Uid};
+use nix::unistd::{chroot, setresgid, setresuid, Gid, Uid, ROOT};
 
 extern crate getopts;
 use getopts::Options;
@@ -218,7 +218,7 @@ impl Tftpd {
     }
 
     fn drop_privs(&self, uid: u32, gid: u32) -> Result<(), Box<Error>> {
-        let root_uid = Uid::from_raw(0);
+        let root_uid = ROOT;
         let root_gid = Gid::from_raw(0);
         let unpriv_uid = Uid::from_raw(uid);
         let unpriv_gid = Gid::from_raw(gid);
@@ -243,6 +243,22 @@ impl Tftpd {
         Ok(())
     }
 
+    fn chroot_destdir(&mut self) -> Result<(), nix::Error> {
+        /* chroot will only succeed if we have required permissions;
+           either running as root or having CAP_SYS_CHROOT.
+           propagate error only if chroot should have succeeded. */
+        match chroot(&self.conf.dir) {
+            Ok(_) => {
+                /* configured dir is now new root directory */
+                self.conf.dir = PathBuf::from("/");
+                Ok(())
+            },
+            Err(err) if err == nix::Error::from_errno(nix::errno::Errno::EPERM) => Ok(()),
+            Err(err) if Uid::effective() == ROOT => Err(err),
+            Err(_) => Ok(()),
+        }
+    }
+
     pub fn start(&mut self) {
         let socket = match UdpSocket::bind(format!("[::]:{}", self.conf.port)) {
             Ok(s) => s,
@@ -251,6 +267,13 @@ impl Tftpd {
                 return;
             }
         };
+        match self.chroot_destdir() {
+            Ok(_) => {},
+            Err(err) => {
+                eprintln!("Changing root directory failed ({}).", err);
+                return;
+            }
+        }
         match self.drop_privs(self.conf.uid, self.conf.gid) {
             Ok(_) => (),
             Err(err) => {
@@ -262,7 +285,7 @@ impl Tftpd {
         match env::set_current_dir(&self.conf.dir) {
             Ok(_) => (),
             Err(err) => {
-                eprintln!("Changing directory to {} failed ({}).", &self.conf.dir.display(), err);
+                eprintln!("Changing directory failed ({}).", err);
                 return;
             }
         }
