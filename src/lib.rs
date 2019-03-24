@@ -39,7 +39,7 @@ pub enum Mode {
 #[derive(Clone, Copy)]
 pub struct TftpOptions {
     blksize: usize,
-    timeout: u8,
+    timeout: Duration,
     tsize: u64,
 }
 
@@ -53,7 +53,7 @@ pub struct Tftp {
 fn default_options() -> TftpOptions {
     TftpOptions {
         blksize: 512,
-        timeout: 3,
+        timeout: Duration::from_secs(3),
         tsize: 0,
     }
 }
@@ -333,7 +333,14 @@ impl Tftp {
                 },
                 "timeout" => match val.parse() {
                     Ok(t) if t >= 1 => {
-                        self.options.timeout = t;
+                        self.options.timeout = Duration::from_secs(t);
+                        true
+                    }
+                    _ => false,
+                },
+                "utimeout" => match val.parse() {
+                    Ok(t) if t >= 1 => {
+                        self.options.timeout = Duration::from_micros(t);
                         true
                     }
                     _ => false,
@@ -349,7 +356,7 @@ impl Tftp {
             }
         });
 
-        sock.set_read_timeout(Some(Duration::from_secs(u64::from(self.options.timeout))))?;
+        sock.set_read_timeout(Some(self.options.timeout))?;
 
         Ok(())
     }

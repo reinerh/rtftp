@@ -12,6 +12,7 @@ Currently supported:
 
 Non-standard options:
 - blksize2: block size as a power of 2
+- utimeout: timeout in microseconds
 
 
 Use cargo to build the binaries (output dir is target/release/):
