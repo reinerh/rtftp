@@ -93,6 +93,20 @@ fn octet_to_netascii(buf: &[u8]) -> Vec<u8> {
     out
 }
 
+fn blksize2(mut size: usize) -> usize {
+    if size == 0 {
+        return 0;
+    }
+
+    let mut msb = 0;
+    while size > 0 {
+        size >>= 1;
+        msb += 1;
+    }
+    1 << (msb - 1)
+}
+
+
 impl Default for Tftp {
     fn default() -> Tftp {
         Tftp {
@@ -305,6 +319,14 @@ impl Tftp {
                 "blksize" => match val.parse() {
                     Ok(b) if b >= 8 && b <= 65464 => {
                         self.options.blksize = b;
+                        true
+                    }
+                    _ => false,
+                },
+                "blksize2" => match val.parse() {
+                    Ok(b) if b >= 8 && b <= 32768 => {
+                        /* select 2^x lower or equal the requested size */
+                        self.options.blksize = blksize2(b);
                         true
                     }
                     _ => false,
@@ -662,5 +684,14 @@ mod tests {
         assert_eq!(octet_to_netascii(b"\r\r\n\n"), b"\r\0\r\0\r\n\r\n");
         assert_eq!(octet_to_netascii(b"\r\0\r\n"), b"\r\0\0\r\0\r\n");
         assert_eq!(octet_to_netascii(b""), b"");
+    }
+
+    #[test]
+    fn test_blksize2() {
+        assert_eq!(blksize2(16), 16);
+        assert_eq!(blksize2(17), 16);
+        assert_eq!(blksize2(15), 8);
+        assert_eq!(blksize2(1), 1);
+        assert_eq!(blksize2(0), 0);
     }
 }
