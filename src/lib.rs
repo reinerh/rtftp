@@ -93,17 +93,8 @@ fn octet_to_netascii(buf: &[u8]) -> Vec<u8> {
     out
 }
 
-fn blksize2(mut size: usize) -> usize {
-    if size == 0 {
-        return 0;
-    }
-
-    let mut msb = 0;
-    while size > 0 {
-        size >>= 1;
-        msb += 1;
-    }
-    1 << (msb - 1)
+fn blksize2(size: usize) -> usize {
+    (size + 1).next_power_of_two() >> 1
 }
 
 
