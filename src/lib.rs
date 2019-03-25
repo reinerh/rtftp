@@ -145,18 +145,14 @@ impl Tftp {
     }
 
     fn get_tftp_str(&self, buf: &[u8]) -> Option<String> {
-        let mut iter = buf.iter();
+        /* make sure the null-terminator exists */
+        buf.iter().find(|&x| *x == 0)?;
 
-        let len = match iter.position(|&x| x == 0) {
-            Some(l) => l,
-            None => return None,
-        };
-        let val = match String::from_utf8(buf[0..len].to_vec()) {
-            Ok(v) => v,
-            Err(_) => return None,
-        };
-
-        Some(val)
+        /* build string from buffer */
+        String::from_utf8(buf.iter()
+                             .take_while(|&x| *x != 0)
+                             .map(|&x| x)
+                             .collect()).ok()
     }
 
     /// Read::read can possibly return less bytes than the requested buffer size,

@@ -64,24 +64,13 @@ impl Tftpd {
 
     fn file_allowed(&self, filename: &Path) -> Option<PathBuf> {
         /* get parent to check dir where file should be read/written */
-        let path = self.conf.dir.join(filename);
-        let path = match path.parent() {
-            Some(p) => p,
-            None => return None,
-        };
-        let path = match path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => return None,
-        };
+        let path = self.conf.dir.join(filename)
+                                .parent()?
+                                .canonicalize()
+                                .ok()?;
 
-        /* get last component to append to canonicalized path */
-        let filename = match filename.file_name() {
-            Some(f) => f,
-            None => return None,
-        };
-        let path = path.join(filename);
-
-        match path.strip_prefix(&self.conf.dir) {
+        /* check last component of given filename appended to canonicalized path */
+        match path.join(filename.file_name()?).strip_prefix(&self.conf.dir) {
             Ok(p) if p != PathBuf::new() => Some(p.to_path_buf()),
             _ => None,
         }
