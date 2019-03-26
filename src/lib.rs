@@ -151,7 +151,7 @@ impl Tftp {
         /* build string from buffer */
         String::from_utf8(buf.iter()
                              .take_while(|&x| *x != 0)
-                             .map(|&x| x)
+                             .cloned()
                              .collect()).ok()
     }
 
@@ -372,26 +372,18 @@ impl Tftp {
     }
 
     pub fn parse_file_mode_options(&self, buf: &[u8]) -> Result<(PathBuf, String, HashMap<String, String>), io::Error> {
-        let dataerr = io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
+        let dataerr = || io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
 
         let mut pos = 0;
-        let filename = match self.get_tftp_str(&buf[pos..]) {
-            Some(f) => f,
-            None => return Err(dataerr),
-        };
+        let filename = self.get_tftp_str(&buf[pos..]).ok_or_else(dataerr)?;
         pos += filename.len() + 1;
 
-        let filename = Path::new(&filename);
-
-        let mode = match self.get_tftp_str(&buf[pos..]) {
-            Some(m) => m.to_lowercase(),
-            None => return Err(dataerr),
-        };
+        let mode = self.get_tftp_str(&buf[pos..]).ok_or_else(dataerr)?.to_lowercase();
         pos += mode.len() + 1;
 
         let options = self.parse_options(&buf[pos..]);
 
-        Ok((filename.to_path_buf(), mode, options))
+        Ok((Path::new(&filename).to_path_buf(), mode, options))
     }
 
     pub fn send_error(&self, socket: &UdpSocket, code: u16, msg: &str) -> Result<(), io::Error> {
