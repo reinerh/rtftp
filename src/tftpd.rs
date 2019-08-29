@@ -206,7 +206,7 @@ impl Tftpd {
         }
     }
 
-    fn drop_privs(&self, uid: u32, gid: u32) -> Result<(), Box<Error>> {
+    fn drop_privs(&self, uid: u32, gid: u32) -> Result<(), Box<dyn Error>> {
         let root_uid = ROOT;
         let root_gid = Gid::from_raw(0);
         let unpriv_uid = Uid::from_raw(uid);

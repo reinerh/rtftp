@@ -163,7 +163,7 @@ impl Tftp {
     /// This function will always fill the buffer completely (like expected from
     /// read_exact), but also works with EOF, by filling the buffer partially and
     /// returning the amount of bytes read.
-    fn read_exact(&self, reader: &mut Read, buf: &mut [u8]) -> Result<usize, io::Error> {
+    fn read_exact(&self, reader: &mut dyn Read, buf: &mut [u8]) -> Result<usize, io::Error> {
         let maxlen = buf.len();
         let mut outbuf = Vec::with_capacity(maxlen);
         let mut len = 0;
