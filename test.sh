@@ -52,7 +52,7 @@ tftpc() {
 }
 
 rtftpd() {
-	$SSD --background --exec "$RTFTPD" --start -- -p $PORT -d "$SERVERDIR" 1>/dev/null
+	$SSD --background --exec "$RTFTPD" --start -- -p $PORT "$SERVERDIR" 1>/dev/null
 }
 
 rtftpc() {

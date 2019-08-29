@@ -306,7 +306,7 @@ fn usage(opts: &Options, program: &str, error: Option<String>) {
         println!("{}\n", err);
     }
     let version = rtftp::VERSION.unwrap_or("");
-    println!("{}", opts.usage(format!("RusTFTP {}\n\n{} [options]", version, program).as_str()));
+    println!("{}", opts.usage(format!("RusTFTP {}\n\n{} [options] [directory]", version, program).as_str()));
 }
 
 fn parse_commandline(args: &[String]) -> Option<Configuration> {
@@ -314,7 +314,6 @@ fn parse_commandline(args: &[String]) -> Option<Configuration> {
     let mut conf: Configuration = Default::default();
     let mut opts = Options::new();
     opts.optflag("h", "help", "display usage information");
-    opts.optopt("d", "directory", "directory to serve (default: current directory)", "DIRECTORY");
     opts.optopt("p", "port", format!("port to listen on (default: {})", conf.port).as_ref(), "PORT");
     opts.optopt("u", "uid", format!("user id to run as (default: {})", conf.uid).as_ref(), "UID");
     opts.optopt("g", "gid", format!("group id to run as (default: {})", conf.gid).as_ref(), "GID");
@@ -341,14 +340,8 @@ fn parse_commandline(args: &[String]) -> Option<Configuration> {
         usage(&opts, &program, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
         return None;
     }
-    if matches.opt_present("d") {
-        conf.dir = match matches.opt_str("d") {
-            Some(d) => Path::new(&d).to_path_buf(),
-            None => {
-                usage(&opts, &program, None);
-                return None;
-            }
-        };
+    if matches.free.len() > 0 {
+        conf.dir = Path::new(&matches.free[0]).to_path_buf();
     }
 
     Some(conf)
