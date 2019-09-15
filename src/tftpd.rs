@@ -181,6 +181,11 @@ impl Tftpd {
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
         socket.connect(cl)?;
 
+        if buf.len() < 2 {
+            self.tftp.send_error(&socket, 0, "Invalid request length")?;
+            return Err(io::Error::new(io::ErrorKind::Other, "invalid request length"));
+        }
+
         match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
             o if o == rtftp::Opcode::RRQ as u16 => {
                 if self.conf.wo {
