@@ -39,7 +39,7 @@ pub enum Mode {
 #[derive(Clone, Copy)]
 pub struct TftpOptions {
     blksize: usize,
-    timeout: u8,
+    timeout: Duration,
     tsize: u64,
 }
 
@@ -53,7 +53,7 @@ pub struct Tftp {
 fn default_options() -> TftpOptions {
     TftpOptions {
         blksize: 512,
-        timeout: 3,
+        timeout: Duration::from_secs(3),
         tsize: 0,
     }
 }
@@ -92,6 +92,11 @@ fn octet_to_netascii(buf: &[u8]) -> Vec<u8> {
     }
     out
 }
+
+fn blksize2(size: usize) -> usize {
+    (size + 1).next_power_of_two() >> 1
+}
+
 
 impl Default for Tftp {
     fn default() -> Tftp {
@@ -140,18 +145,14 @@ impl Tftp {
     }
 
     fn get_tftp_str(&self, buf: &[u8]) -> Option<String> {
-        let mut iter = buf.iter();
+        /* make sure the null-terminator exists */
+        buf.iter().find(|&x| *x == 0)?;
 
-        let len = match iter.position(|&x| x == 0) {
-            Some(l) => l,
-            None => return None,
-        };
-        let val = match String::from_utf8(buf[0..len].to_vec()) {
-            Ok(v) => v,
-            Err(_) => return None,
-        };
-
-        Some(val)
+        /* build string from buffer */
+        String::from_utf8(buf.iter()
+                             .take_while(|&x| *x != 0)
+                             .cloned()
+                             .collect()).ok()
     }
 
     /// Read::read can possibly return less bytes than the requested buffer size,
@@ -162,7 +163,7 @@ impl Tftp {
     /// This function will always fill the buffer completely (like expected from
     /// read_exact), but also works with EOF, by filling the buffer partially and
     /// returning the amount of bytes read.
-    fn read_exact(&self, reader: &mut Read, buf: &mut [u8]) -> Result<usize, io::Error> {
+    fn read_exact(&self, reader: &mut dyn Read, buf: &mut [u8]) -> Result<usize, io::Error> {
         let maxlen = buf.len();
         let mut outbuf = Vec::with_capacity(maxlen);
         let mut len = 0;
@@ -309,9 +310,24 @@ impl Tftp {
                     }
                     _ => false,
                 },
+                "blksize2" => match val.parse() {
+                    Ok(b) if b >= 8 && b <= 32768 => {
+                        /* select 2^x lower or equal the requested size */
+                        self.options.blksize = blksize2(b);
+                        true
+                    }
+                    _ => false,
+                },
                 "timeout" => match val.parse() {
                     Ok(t) if t >= 1 => {
-                        self.options.timeout = t;
+                        self.options.timeout = Duration::from_secs(t);
+                        true
+                    }
+                    _ => false,
+                },
+                "utimeout" => match val.parse() {
+                    Ok(t) if t >= 1 => {
+                        self.options.timeout = Duration::from_micros(t);
                         true
                     }
                     _ => false,
@@ -327,7 +343,7 @@ impl Tftp {
             }
         });
 
-        sock.set_read_timeout(Some(Duration::from_secs(u64::from(self.options.timeout))))?;
+        sock.set_read_timeout(Some(self.options.timeout))?;
 
         Ok(())
     }
@@ -356,26 +372,18 @@ impl Tftp {
     }
 
     pub fn parse_file_mode_options(&self, buf: &[u8]) -> Result<(PathBuf, String, HashMap<String, String>), io::Error> {
-        let dataerr = io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
+        let dataerr = || io::Error::new(io::ErrorKind::InvalidData, "invalid data received");
 
         let mut pos = 0;
-        let filename = match self.get_tftp_str(&buf[pos..]) {
-            Some(f) => f,
-            None => return Err(dataerr),
-        };
+        let filename = self.get_tftp_str(&buf[pos..]).ok_or_else(dataerr)?;
         pos += filename.len() + 1;
 
-        let filename = Path::new(&filename);
-
-        let mode = match self.get_tftp_str(&buf[pos..]) {
-            Some(m) => m.to_lowercase(),
-            None => return Err(dataerr),
-        };
+        let mode = self.get_tftp_str(&buf[pos..]).ok_or_else(dataerr)?.to_lowercase();
         pos += mode.len() + 1;
 
         let options = self.parse_options(&buf[pos..]);
 
-        Ok((filename.to_path_buf(), mode, options))
+        Ok((Path::new(&filename).to_path_buf(), mode, options))
     }
 
     pub fn send_error(&self, socket: &UdpSocket, code: u16, msg: &str) -> Result<(), io::Error> {
@@ -662,5 +670,14 @@ mod tests {
         assert_eq!(octet_to_netascii(b"\r\r\n\n"), b"\r\0\r\0\r\n\r\n");
         assert_eq!(octet_to_netascii(b"\r\0\r\n"), b"\r\0\0\r\0\r\n");
         assert_eq!(octet_to_netascii(b""), b"");
+    }
+
+    #[test]
+    fn test_blksize2() {
+        assert_eq!(blksize2(16), 16);
+        assert_eq!(blksize2(17), 16);
+        assert_eq!(blksize2(15), 8);
+        assert_eq!(blksize2(1), 1);
+        assert_eq!(blksize2(0), 0);
     }
 }

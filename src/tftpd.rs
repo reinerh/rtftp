@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 extern crate nix;
-use nix::unistd::{setresgid, setresuid, Gid, Uid};
+use nix::unistd::{chroot, setresgid, setresuid, Gid, Uid, ROOT};
 
 extern crate getopts;
 use getopts::Options;
@@ -64,24 +64,13 @@ impl Tftpd {
 
     fn file_allowed(&self, filename: &Path) -> Option<PathBuf> {
         /* get parent to check dir where file should be read/written */
-        let path = self.conf.dir.join(filename);
-        let path = match path.parent() {
-            Some(p) => p,
-            None => return None,
-        };
-        let path = match path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => return None,
-        };
+        let path = self.conf.dir.join(filename)
+                                .parent()?
+                                .canonicalize()
+                                .ok()?;
 
-        /* get last component to append to canonicalized path */
-        let filename = match filename.file_name() {
-            Some(f) => f,
-            None => return None,
-        };
-        let path = path.join(filename);
-
-        match path.strip_prefix(&self.conf.dir) {
+        /* check last component of given filename appended to canonicalized path */
+        match path.join(filename.file_name()?).strip_prefix(&self.conf.dir) {
             Ok(p) if p != PathBuf::new() => Some(p.to_path_buf()),
             _ => None,
         }
@@ -192,6 +181,11 @@ impl Tftpd {
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
         socket.connect(cl)?;
 
+        if buf.len() < 2 {
+            self.tftp.send_error(&socket, 0, "Invalid request length")?;
+            return Err(io::Error::new(io::ErrorKind::Other, "invalid request length"));
+        }
+
         match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
             o if o == rtftp::Opcode::RRQ as u16 => {
                 if self.conf.wo {
@@ -217,8 +211,8 @@ impl Tftpd {
         }
     }
 
-    fn drop_privs(&self, uid: u32, gid: u32) -> Result<(), Box<Error>> {
-        let root_uid = Uid::from_raw(0);
+    fn drop_privs(&self, uid: u32, gid: u32) -> Result<(), Box<dyn Error>> {
+        let root_uid = ROOT;
         let root_gid = Gid::from_raw(0);
         let unpriv_uid = Uid::from_raw(uid);
         let unpriv_gid = Gid::from_raw(gid);
@@ -243,6 +237,22 @@ impl Tftpd {
         Ok(())
     }
 
+    fn chroot_destdir(&mut self) -> Result<(), nix::Error> {
+        /* chroot will only succeed if we have required permissions;
+           either running as root or having CAP_SYS_CHROOT.
+           propagate error only if chroot should have succeeded. */
+        match chroot(&self.conf.dir) {
+            Ok(_) => {
+                /* configured dir is now new root directory */
+                self.conf.dir = PathBuf::from("/");
+                Ok(())
+            },
+            Err(err) if err == nix::Error::from_errno(nix::errno::Errno::EPERM) => Ok(()),
+            Err(err) if Uid::effective() == ROOT => Err(err),
+            Err(_) => Ok(()),
+        }
+    }
+
     pub fn start(&mut self) {
         let socket = match UdpSocket::bind(format!("[::]:{}", self.conf.port)) {
             Ok(s) => s,
@@ -251,6 +261,13 @@ impl Tftpd {
                 return;
             }
         };
+        match self.chroot_destdir() {
+            Ok(_) => {},
+            Err(err) => {
+                eprintln!("Changing root directory failed ({}).", err);
+                return;
+            }
+        }
         match self.drop_privs(self.conf.uid, self.conf.gid) {
             Ok(_) => (),
             Err(err) => {
@@ -262,7 +279,7 @@ impl Tftpd {
         match env::set_current_dir(&self.conf.dir) {
             Ok(_) => (),
             Err(err) => {
-                eprintln!("Changing directory to {} failed ({}).", &self.conf.dir.display(), err);
+                eprintln!("Changing directory failed ({}).", err);
                 return;
             }
         }
@@ -289,90 +306,57 @@ impl Tftpd {
     }
 }
 
-fn usage(opts: Options, program: String, error: Option<String>) {
+fn usage(opts: &Options, program: &str, error: Option<String>) {
     if let Some(err) = error {
         println!("{}\n", err);
     }
     let version = rtftp::VERSION.unwrap_or("");
-    println!("{}", opts.usage(format!("RusTFTP {}\n\n{} [options]", version, program).as_str()));
+    println!("{}", opts.usage(format!("RusTFTP {}\n\n{} [options] [directory]", version, program).as_str()));
 }
 
-fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
+fn parse_commandline(args: &[String]) -> Option<Configuration> {
     let program = args[0].clone();
     let mut conf: Configuration = Default::default();
     let mut opts = Options::new();
     opts.optflag("h", "help", "display usage information");
-    opts.optopt("d", "directory", "directory to serve (default: current directory)", "DIRECTORY");
     opts.optopt("p", "port", format!("port to listen on (default: {})", conf.port).as_ref(), "PORT");
     opts.optopt("u", "uid", format!("user id to run as (default: {})", conf.uid).as_ref(), "UID");
     opts.optopt("g", "gid", format!("group id to run as (default: {})", conf.gid).as_ref(), "GID");
     opts.optflag("r", "read-only", "allow only reading/downloading of files (RRQ)");
     opts.optflag("w", "write-only", "allow only writing/uploading of files (WRQ)");
     opts.optopt("t", "threads", format!("number of worker threads (default: {})", conf.threads).as_ref(), "N");
-    let matches = match opts.parse(&args[1..]) {
-        Ok(m) => m,
-        Err(err) => {
-            usage(opts, program, Some(err.to_string()));
-            return Err("Parsing error");
-        }
-    };
+
+    let getopts_fail = |err: getopts::Fail| { usage(&opts, &program, Some(err.to_string())) };
+    let conv_error = |err: std::num::ParseIntError| { usage(&opts, &program, Some(err.to_string())) };
+
+    let matches = opts.parse(&args[1..]).map_err(getopts_fail).ok()?;
     if matches.opt_present("h") {
-        usage(opts, program, None);
-        return Err("usage");
+        usage(&opts, &program, None);
+        return None;
     }
 
-    conf.port = match matches.opt_get_default("p", conf.port) {
-        Ok(p) => p,
-        Err(err) => {
-            usage(opts, program, Some(err.to_string()));
-            return Err("port");
-        }
-    };
-    conf.uid = match matches.opt_get_default("u", conf.uid) {
-        Ok(u) => u,
-        Err(err) => {
-            usage(opts, program, Some(err.to_string()));
-            return Err("uid");
-        }
-    };
-    conf.gid = match matches.opt_get_default("g", conf.gid) {
-        Ok(g) => g,
-        Err(err) => {
-            usage(opts, program, Some(err.to_string()));
-            return Err("gid");
-        }
-    };
-    conf.threads = match matches.opt_get_default("t", conf.threads) {
-        Ok(t) => t,
-        Err(err) => {
-            usage(opts, program, Some(err.to_string()));
-            return Err("threads");
-        }
-    };
+    conf.port = matches.opt_get_default("p", conf.port).map_err(conv_error).ok()?;
+    conf.uid = matches.opt_get_default("u", conf.uid).map_err(conv_error).ok()?;
+    conf.gid = matches.opt_get_default("g", conf.gid).map_err(conv_error).ok()?;
+    conf.threads = matches.opt_get_default("t", conf.threads).map_err(conv_error).ok()?;
     conf.ro = matches.opt_present("r");
     conf.wo = matches.opt_present("w");
     if conf.ro && conf.wo {
-        usage(opts, program, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
-        return Err("ro and wo");
+        usage(&opts, &program, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
+        return None;
     }
-    if matches.opt_present("d") {
-        conf.dir = match matches.opt_str("d") {
-            Some(d) => Path::new(&d).to_path_buf(),
-            None => {
-                usage(opts, program, None);
-                return Err("directory");
-            }
-        };
+    if matches.free.len() > 0 {
+        conf.dir = Path::new(&matches.free[0]).to_path_buf();
     }
 
-    Ok(conf)
+    Some(conf)
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let conf = match parse_commandline(&args) {
-        Ok(c) => c,
-        Err(_) => return,
+        Some(c) => c,
+        None => return,
     };
 
     Tftpd::new(conf).start();

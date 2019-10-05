@@ -65,35 +65,23 @@ impl Tftpc {
 
     fn wait_for_option_ack(&mut self, sock: &UdpSocket) -> Option<SocketAddr> {
         let mut buf = [0; 512];
-        match sock.peek_from(&mut buf) {
-            Ok(_) => (),
-            Err(_) => return None,
-        };
+        sock.peek_from(&mut buf).ok()?;
         let opcode = u16::from_be_bytes([buf[0], buf[1]]);
         if opcode != rtftp::Opcode::OACK as u16 {
             return None;
         }
 
-        let (len, remote) = match sock.recv_from(&mut buf) {
-            Ok(args) => args,
-            Err(_) => return None,
-        };
+        let (len, remote) = sock.recv_from(&mut buf).ok()?;
 
         let mut options = self.tftp.parse_options(&buf[2..len]);
-        match self.tftp.init_tftp_options(&sock, &mut options) {
-            Ok(_) => {}
-            Err(_) => return None,
-        }
+        self.tftp.init_tftp_options(&sock, &mut options).ok()?;
 
         Some(remote)
     }
 
     fn wait_for_response(&self, sock: &UdpSocket, expected_opcode: rtftp::Opcode, expected_block: u16, expected_remote: Option<SocketAddr>) -> Result<Option<SocketAddr>, std::io::Error> {
         let mut buf = [0; 4];
-        let (len, remote) = match sock.peek_from(&mut buf) {
-            Ok(args) => args,
-            Err(err) => return Err(err),
-        };
+        let (len, remote) = sock.peek_from(&mut buf)?;
 
         if let Some(rem) = expected_remote {
             /* verify we got a response from the same client that sent
@@ -140,24 +128,14 @@ impl Tftpc {
     }
 
     fn handle_wrq(&mut self, sock: &UdpSocket) -> Result<String, io::Error> {
-        let mut file = match File::open(self.conf.filename.as_path()) {
-            Ok(f) => f,
-            Err(err) => return Err(err),
-        };
-        let err_invalidpath = io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename");
-        let filename = match self.conf.filename.file_name() {
-            Some(f) => match f.to_str() {
-                Some(s) => s,
-                None => return Err(err_invalidpath),
-            },
-            None => return Err(err_invalidpath),
-        };
-        let metadata = match file.metadata() {
-            Ok(m) => m,
-            Err(_) => return Err(err_invalidpath),
-        };
+        let mut file = File::open(self.conf.filename.as_path())?;
+        let err_invalidpath = || io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename");
+
+        let filename = self.conf.filename.file_name().ok_or_else(err_invalidpath)?
+                                         .to_str().ok_or_else(err_invalidpath)?;
+        let metadata = file.metadata().map_err(|_| err_invalidpath())?;
         if !metadata.is_file() {
-            return Err(err_invalidpath);
+            return Err(err_invalidpath());
         }
 
         let tsize = self.tftp.transfersize(&mut file)?;
@@ -192,19 +170,11 @@ impl Tftpc {
     }
 
     fn handle_rrq(&mut self, sock: &UdpSocket) -> Result<String, io::Error> {
-        let filename = match self.conf.filename.file_name() {
-            Some(f) => f,
-            None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
-        };
+        let err_invalidpath = || io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename");
+        let filename = self.conf.filename.file_name().ok_or_else(err_invalidpath)?;
         let outpath = env::current_dir().expect("Can't get current directory").join(filename);
-        let mut file = match File::create(outpath) {
-            Ok(f) => f,
-            Err(err) => return Err(err),
-        };
-        let filename = match self.conf.filename.to_str() {
-            Some(f) => f,
-            None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid path/filename")),
-        };
+        let mut file = File::create(outpath)?;
+        let filename = self.conf.filename.to_str().ok_or_else(err_invalidpath)?;
 
         let buf = self.init_req(rtftp::Opcode::RRQ, filename, 0);
 
@@ -256,7 +226,7 @@ impl Tftpc {
     }
 }
 
-fn usage(opts: Options, program: String, error: Option<String>) {
+fn usage(opts: &Options, program: &str, error: Option<String>) {
     if let Some(err) = error {
         println!("{}\n", err);
     }
@@ -264,7 +234,7 @@ fn usage(opts: Options, program: String, error: Option<String>) {
     println!("{}", opts.usage(format!("RusTFTP {}\n\n{} [options] <remote>[:port]", version, program).as_str()));
 }
 
-fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
+fn parse_commandline(args: &[String]) -> Option<Configuration> {
     let program = args[0].clone();
     let mut operation = None;
     let mut mode = rtftp::Mode::OCTET;
@@ -277,16 +247,14 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     opts.optopt("p", "put", "upload file to remote server", "FILE");
     opts.optopt("b", "blksize", format!("negotiate a different block size (default: {})", blksize).as_ref(), "SIZE");
     opts.optflag("n", "netascii","use netascii mode (instead of octet)");
-    let matches = match opts.parse(&args[1..]) {
-        Ok(m) => m,
-        Err(err) => {
-            usage(opts, program, Some(err.to_string()));
-            return Err("Parsing error");
-        }
-    };
+
+    let getopts_fail = |err: getopts::Fail| { usage(&opts, &program, Some(err.to_string())) };
+    let conv_error = |err: std::num::ParseIntError| { usage(&opts, &program, Some(err.to_string())) };
+
+    let matches = opts.parse(&args[1..]).map_err(getopts_fail).ok()?;
     if matches.opt_present("h") || matches.free.len() != 1 {
-        usage(opts, program, None);
-        return Err("usage");
+        usage(&opts, &program, None);
+        return None;
     }
 
     if let Some(f) = matches.opt_str("g") {
@@ -299,8 +267,8 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
     }
 
     if operation.is_none() || (matches.opt_present("g") && matches.opt_present("p")) {
-        usage(opts, program, Some("Exactly one of g (get) and p (put) required".to_string()));
-        return Err("get put");
+        usage(&opts, &program, Some("Exactly one of g (get) and p (put) required".to_string()));
+        return None;
     }
 
     if matches.opt_present("n") {
@@ -309,25 +277,19 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
 
     let remote_in = matches.free[0].as_str();
     let remote = match remote_in.to_socket_addrs() {
-        Ok(mut i) => i.next(),
+        Ok(i) => i,
         Err(_) => match (remote_in, 69).to_socket_addrs() {
-            Ok(mut j) => j.next(),
+            Ok(j) => j,
             Err(_) => {
-                usage(opts, program, Some("Failed to parse and lookup specified remote".to_string()));
-                return Err("lookup");
+                usage(&opts, &program, Some("Failed to parse and lookup specified remote".to_string()));
+                return None;
             }
         },
-    };
+    }.next();
 
-    blksize = match matches.opt_get_default::<usize>("b", blksize) {
-        Ok(b) => b,
-        Err(err) => {
-            usage(opts, program, Some(err.to_string()));
-            return Err("blksize");
-        }
-    };
+    blksize = matches.opt_get_default::<usize>("b", blksize).map_err(conv_error).ok()?;
 
-    Ok(Configuration {
+    Some(Configuration {
         operation: operation.unwrap(),
         mode,
         filename: filename.unwrap(),
@@ -339,8 +301,8 @@ fn parse_commandline(args: &[String]) -> Result<Configuration, &str> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let conf = match parse_commandline(&args) {
-        Ok(c) => c,
-        Err(_) => return,
+        Some(c) => c,
+        None => return,
     };
 
     Tftpc::new(conf).start();

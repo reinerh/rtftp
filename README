@@ -10,6 +10,10 @@ Currently supported:
 - RFC 2348 (Blocksize Option)
 - RFC 2349 (Timeout Interval and Transfer Size Options)
 
+Non-standard options:
+- blksize2: block size as a power of 2
+- utimeout: timeout in microseconds
+
 
 Use cargo to build the binaries (output dir is target/release/):
  $ cargo build --release
@@ -35,12 +39,10 @@ Server:
  $ ./rtftpd --help
  RusTFTP
  
- ./rtftpd [options]
+ ./rtftpd [options] [directory]
  
  Options:
      -h, --help          display usage information
-     -d, --directory DIRECTORY
-                         directory to serve (default: current directory)
      -p, --port PORT     port to listen on (default: 69)
      -u, --uid UID       user id to run as (default: 65534)
      -g, --gid GID       group id to run as (default: 65534)

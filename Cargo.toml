@@ -1,6 +1,6 @@
 [package]
 name = "rtftp"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["Reiner Herrmann <reiner@reiner-h.de>"]
 edition = "2018"
 license = "GPL-3.0-or-later"
@@ -10,8 +10,8 @@ lto = true
 panic = 'abort'
 
 [dependencies]
-nix = "0.13.0"
-getopts = "0.2.18"
+nix = "0.15.0"
+getopts = "0.2.19"
 threadpool = "1.7.1"
 
 [[bin]]
