@@ -1,0 +1,14 @@
+1.1.0 (2019-10-05)
+  * Server:
+    - chroot to destination directory if permissions are sufficient
+    - drop -d parameter, but allow directory at the end of the command line
+  * Support for some non-standard options:
+    - blksize2
+    - utimeout
+
+1.0.0 (2019-03-12)
+  * Initial release
+  * RFC 1350 (TFTP revision 2)
+  * RFC 2347 (Option Extension)
+  * RFC 2348 (Blocksize Option)
+  * RFC 2349 (Timeout Interval and Transfer Size Options)
