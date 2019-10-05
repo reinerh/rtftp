@@ -8,7 +8,7 @@ Build-Depends: debhelper-compat (= 12),
                librust-getopts-dev (>= 0.2.18),
                librust-nix-dev (>= 0.13.0),
                librust-threadpool-dev (>= 1.7.1)
-Standards-Version: 4.3.0
+Standards-Version: 4.4.1
 Rules-Requires-Root: no
 
 Package: rtftp
