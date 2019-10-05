@@ -1,3 +1,10 @@
+rtftp (1.1.0-1) released; urgency=low
+
+  * New upstream release.
+  * Bump Standards-Version to 4.4.1.
+
+ -- Reiner Herrmann <reiner@reiner-h.de>  Sat, 05 Oct 2019 15:52:33 +0200
+
 rtftp (1.0.0-1) released; urgency=low
 
   * Initial release.
