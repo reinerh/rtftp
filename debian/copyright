@@ -2,7 +2,7 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: RusTFTP
 
 Files: *
-Copyright: 2019 Reiner Herrmann <reiner@reiner-h.de>
+Copyright: 2019-2020 Reiner Herrmann <reiner@reiner-h.de>
 License: GPL-3+
 
 License: GPL-3+
