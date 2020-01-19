@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Reiner Herrmann <reiner@reiner-h.de>
+ * Copyright 2019-2020 Reiner Herrmann <reiner@reiner-h.de>
  * License: GPL-3+
  */
 
@@ -218,10 +218,7 @@ impl Tftpc {
         };
         match err {
             Ok(msg) => println!("{}", msg),
-            Err(err) => {
-                println!("Error: {}", err);
-                return;
-            }
+            Err(err) => println!("Error: {}", err),
         }
     }
 }

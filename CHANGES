@@ -1,3 +1,8 @@
+1.1.1 (2020-01-19)
+  * Skip canonical path check when running chrooted.
+    This works around a requirement by musl to have a mounted /proc filesystem
+    when calling realpath(3).
+
 1.1.0 (2019-10-05)
   * Server:
     - chroot to destination directory if permissions are sufficient

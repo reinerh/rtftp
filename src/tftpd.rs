@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Reiner Herrmann <reiner@reiner-h.de>
+ * Copyright 2019-2020 Reiner Herrmann <reiner@reiner-h.de>
  * License: GPL-3+
  */
 
@@ -63,6 +63,12 @@ impl Tftpd {
     }
 
     fn file_allowed(&self, filename: &Path) -> Option<PathBuf> {
+        if self.conf.dir == PathBuf::from("/") {
+            /* running either chrooted in requested directory,
+               or whole root is being served */
+            return Some(filename.to_path_buf());
+        }
+
         /* get parent to check dir where file should be read/written */
         let path = self.conf.dir.join(filename)
                                 .parent()?
@@ -76,7 +82,7 @@ impl Tftpd {
         }
     }
 
-    fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(String), io::Error> {
+    fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<String, io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
         self.tftp.init_tftp_options(&socket, &mut options)?;
 
@@ -123,7 +129,7 @@ impl Tftpd {
         }
     }
 
-    fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(String), io::Error> {
+    fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<String, io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
         self.tftp.init_tftp_options(&socket, &mut options)?;
 
@@ -345,7 +351,7 @@ fn parse_commandline(args: &[String]) -> Option<Configuration> {
         usage(&opts, &program, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
         return None;
     }
-    if matches.free.len() > 0 {
+    if !matches.free.is_empty() {
         conf.dir = Path::new(&matches.free[0]).to_path_buf();
     }
 
