@@ -1,3 +1,11 @@
+rtftp (1.1.1-1) released; urgency=low
+
+  * New upstream release.
+  * Bump copyright years.
+  * Update versions of build dependencies.
+
+ -- Reiner Herrmann <reiner@reiner-h.de>  Sun, 19 Jan 2020 15:43:33 +0100
+
 rtftp (1.1.0-1) released; urgency=low
 
   * New upstream release.
