@@ -63,6 +63,12 @@ impl Tftpd {
     }
 
     fn file_allowed(&self, filename: &Path) -> Option<PathBuf> {
+        if self.conf.dir == PathBuf::from("/") {
+            /* running either chrooted in requested directory,
+               or whole root is being served */
+            return Some(filename.to_path_buf());
+        }
+
         /* get parent to check dir where file should be read/written */
         let path = self.conf.dir.join(filename)
                                 .parent()?
