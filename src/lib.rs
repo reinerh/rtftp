@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Reiner Herrmann <reiner@reiner-h.de>
+ * Copyright 2019-2020 Reiner Herrmann <reiner@reiner-h.de>
  * License: GPL-3+
  */
 
