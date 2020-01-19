@@ -10,8 +10,8 @@ lto = true
 panic = 'abort'
 
 [dependencies]
-nix = "0.15.0"
-getopts = "0.2.19"
+nix = "0.16.1"
+getopts = "0.2.21"
 threadpool = "1.7.1"
 
 [[bin]]
