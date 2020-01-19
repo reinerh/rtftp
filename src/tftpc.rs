@@ -218,10 +218,7 @@ impl Tftpc {
         };
         match err {
             Ok(msg) => println!("{}", msg),
-            Err(err) => {
-                println!("Error: {}", err);
-                return;
-            }
+            Err(err) => println!("Error: {}", err),
         }
     }
 }

@@ -82,7 +82,7 @@ impl Tftpd {
         }
     }
 
-    fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(String), io::Error> {
+    fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<String, io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
         self.tftp.init_tftp_options(&socket, &mut options)?;
 
@@ -129,7 +129,7 @@ impl Tftpd {
         }
     }
 
-    fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<(String), io::Error> {
+    fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<String, io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
         self.tftp.init_tftp_options(&socket, &mut options)?;
 
@@ -351,7 +351,7 @@ fn parse_commandline(args: &[String]) -> Option<Configuration> {
         usage(&opts, &program, Some(String::from("Only one of r (read-only) and w (write-only) allowed")));
         return None;
     }
-    if matches.free.len() > 0 {
+    if !matches.free.is_empty() {
         conf.dir = Path::new(&matches.free[0]).to_path_buf();
     }
 
