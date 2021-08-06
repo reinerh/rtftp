@@ -253,7 +253,7 @@ impl Tftpd {
                 self.conf.dir = PathBuf::from("/");
                 Ok(())
             },
-            Err(err) if err == nix::Error::from_errno(nix::errno::Errno::EPERM) => Ok(()),
+            Err(err) if err == nix::errno::Errno::EPERM => Ok(()),
             Err(err) if Uid::effective() == ROOT => Err(err),
             Err(_) => Ok(()),
         }
