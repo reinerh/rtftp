@@ -21,6 +21,11 @@ Use cargo to build the binaries (output dir is `target/release/`):
 $ cargo build --release
 ```
 
+To directly download, compile and install the binaries:
+```
+$ cargo install rtftp
+```
+
 
 ### Client
 
