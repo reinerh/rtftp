@@ -1,3 +1,10 @@
+1.1.2 (2021-08-06)
+  * Only non-functional changes
+  * Fix new linter warnings
+  * Update dependencies
+  * Test also against curl in test suite
+  * Add metadata for publishing to crates.io
+
 1.1.1 (2020-01-19)
   * Skip canonical path check when running chrooted.
     This works around a requirement by musl to have a mounted /proc filesystem
