@@ -18,6 +18,8 @@ TFTPC=/usr/bin/tftp
 
 BUSYBOX=/bin/busybox
 
+CURL=/usr/bin/curl
+
 CLIENTDIR=$(mktemp -d)
 SERVERDIR=$(mktemp -d)
 
@@ -60,6 +62,12 @@ rtftpc() {
 	[ -n "$BLKSIZE" ] && opts="--blksize $BLKSIZE"
 	[ -n "$NETASCII" ] && opts="$opts -n"
 	$RTFTPC $op testfile $opts 127.0.0.1:$PORT 1>/dev/null
+}
+
+curl() {
+	[ $TX -eq 1 ] && op="-T" || op="-o"
+	[ -n "$BLKSIZE" ] && opts="--tftp-blksize $BLKSIZE"
+	$CURL --silent $op testfile $opts tftp://127.0.0.1:$PORT/testfile
 }
 
 busybox_tftpc() {
@@ -121,6 +129,7 @@ test_transfer rtftpc rtftpd
 [ -x $ATFTPC ]  && test_transfer atftpc rtftpd
 [ -x $TFTPC ]   && test_transfer tftpc rtftpd
 [ -x $BUSYBOX ] && test_transfer busybox_tftpc rtftpd
+[ -x $CURL ]    && test_transfer curl rtftpd
 
 # with netascii mode
 printf "\\n\\nTesting netascii transfers\\n"
@@ -137,6 +146,7 @@ test_transfer rtftpc rtftpd
 [ -x $ATFTPD ]  && test_transfer rtftpc atftpd
 [ -x $ATFTPC ]  && test_transfer atftpc rtftpd
 [ -x $BUSYBOX ] && test_transfer busybox_tftpc rtftpd
+[ -x $CURL ]    && test_transfer curl rtftpd
 unset BLKSIZE
 
 # blocksize and netascii
