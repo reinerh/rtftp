@@ -99,7 +99,7 @@ test_transfer() {
 		${client}
 		compare_files
 		printf "ok"
-	)
+	) 2>&1
 	rm -f "$CLIENTDIR/testfile"
 
 	time (
@@ -108,7 +108,7 @@ test_transfer() {
 		${client}
 		compare_files
 		printf "ok"
-	)
+	) 2>&1
 	rm -f "$SERVERDIR/testfile"
 
 	${server}_cleanup
