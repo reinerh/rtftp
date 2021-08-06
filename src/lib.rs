@@ -270,7 +270,7 @@ impl Tftp {
         if options.is_empty() {
             if !ackwait {
                 /* it's a WRQ, send normal ack to start transfer */
-                self.send_ack(&sock, 0)?;
+                self.send_ack(sock, 0)?;
             }
             return Ok(());
         }
@@ -287,7 +287,7 @@ impl Tftp {
             if !ackwait {
                 return Ok(());
             }
-            match self.wait_for_ack(&sock, 0) {
+            match self.wait_for_ack(sock, 0) {
                 Ok(true) => return Ok(()),
                 Ok(false) => continue,
                 Err(e) => return Err(e),
@@ -304,14 +304,14 @@ impl Tftp {
             let val = val.to_lowercase();
             match key.to_lowercase().as_str() {
                 "blksize" => match val.parse() {
-                    Ok(b) if b >= 8 && b <= 65464 => {
+                    Ok(b) if (8..=65464).contains(&b) => {
                         self.options.blksize = b;
                         true
                     }
                     _ => false,
                 },
                 "blksize2" => match val.parse() {
-                    Ok(b) if b >= 8 && b <= 32768 => {
+                    Ok(b) if (8..=32768).contains(&b) => {
                         /* select 2^x lower or equal the requested size */
                         self.options.blksize = blksize2(b);
                         true
@@ -431,7 +431,7 @@ impl Tftp {
             let mut len = match self.read_exact(&mut reader, &mut filebuf) {
                 Ok(n) => n,
                 Err(err) => {
-                    self.send_error(&socket, 0, "File reading error")?;
+                    self.send_error(socket, 0, "File reading error")?;
                     return Err(err);
                 }
             };
@@ -462,7 +462,7 @@ impl Tftp {
                 /* try a couple of times to send data, in case of timeouts
                    or re-ack of previous data */
                 socket.send(&sendbuf)?;
-                match self.wait_for_ack(&socket, block_nr) {
+                match self.wait_for_ack(socket, block_nr) {
                     Ok(true) => {
                         acked = true;
                         break;
@@ -507,7 +507,7 @@ impl Tftp {
                     Ok(n) => n,
                     Err(ref error) if [io::ErrorKind::WouldBlock, io::ErrorKind::TimedOut].contains(&error.kind()) => {
                         /* re-ack previous and try to recv again */
-                        self.send_ack(&sock, block_nr - 1)?;
+                        self.send_ack(sock, block_nr - 1)?;
                         continue;
                     }
                     Err(err) => return Err(err),
@@ -526,7 +526,7 @@ impl Tftp {
             };
             if u16::from_be_bytes([buf[2], buf[3]]) != block_nr {
                 /* already received or packets were missed, re-acknowledge */
-                self.send_ack(&sock, block_nr - 1)?;
+                self.send_ack(sock, block_nr - 1)?;
                 continue;
             }
 
@@ -546,7 +546,7 @@ impl Tftp {
                 prog_update = cb(transferred, tsize, prog_update);
             }
 
-            self.send_ack(&sock, block_nr)?;
+            self.send_ack(sock, block_nr)?;
             block_nr = block_nr.wrapping_add(1);
 
             if len < 4 + self.options.blksize {

@@ -84,13 +84,13 @@ impl Tftpd {
 
     fn handle_wrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<String, io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
-        self.tftp.init_tftp_options(&socket, &mut options)?;
+        self.tftp.init_tftp_options(socket, &mut options)?;
 
         match mode.as_ref() {
             "octet" => self.tftp.set_mode(rtftp::Mode::OCTET),
             "netascii" => self.tftp.set_mode(rtftp::Mode::NETASCII),
             _ => {
-                self.tftp.send_error(&socket, 0, "Unsupported mode")?;
+                self.tftp.send_error(socket, 0, "Unsupported mode")?;
                 return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
             }
         }
@@ -99,7 +99,7 @@ impl Tftpd {
             Some(p) => p,
             None => {
                 let err = format!("Receiving {} from {} failed (permission check failed).", filename.display(), cl);
-                self.tftp.send_error(&socket, 2, "Permission denied")?;
+                self.tftp.send_error(socket, 2, "Permission denied")?;
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
             }
         };
@@ -108,22 +108,22 @@ impl Tftpd {
             Ok(f) => f,
             Err(ref err) if err.kind() == io::ErrorKind::AlreadyExists => {
                 let error = format!("Receiving {} from {} failed ({}).", path.display(), cl, err);
-                self.tftp.send_error(&socket, 6, "File already exists")?;
+                self.tftp.send_error(socket, 6, "File already exists")?;
                 return Err(io::Error::new(err.kind(), error));
             }
             Err(err) => {
                 let error = format!("Receiving {} from {} failed ({}).", path.display(), cl, err);
-                self.tftp.send_error(&socket, 6, "Permission denied")?;
+                self.tftp.send_error(socket, 6, "Permission denied")?;
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, error));
             }
         };
 
-        self.tftp.ack_options(&socket, &options, false)?;
-        match self.tftp.recv_file(&socket, &mut file) {
+        self.tftp.ack_options(socket, &options, false)?;
+        match self.tftp.recv_file(socket, &mut file) {
             Ok(_) => Ok(format!("Received {} from {}.", path.display(), cl)),
             Err(ref err) => {
                 let error = format!("Receiving {} from {} failed ({}).", path.display(), cl, err);
-                self.tftp.send_error(&socket, 0, "Receiving error")?;
+                self.tftp.send_error(socket, 0, "Receiving error")?;
                 Err(io::Error::new(err.kind(), error))
             }
         }
@@ -131,13 +131,13 @@ impl Tftpd {
 
     fn handle_rrq(&mut self, socket: &UdpSocket, cl: &SocketAddr, buf: &[u8]) -> Result<String, io::Error> {
         let (filename, mode, mut options) = self.tftp.parse_file_mode_options(buf)?;
-        self.tftp.init_tftp_options(&socket, &mut options)?;
+        self.tftp.init_tftp_options(socket, &mut options)?;
 
         match mode.as_ref() {
             "octet" => self.tftp.set_mode(rtftp::Mode::OCTET),
             "netascii" => self.tftp.set_mode(rtftp::Mode::NETASCII),
             _ => {
-                self.tftp.send_error(&socket, 0, "Unsupported mode")?;
+                self.tftp.send_error(socket, 0, "Unsupported mode")?;
                 return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
             }
         }
@@ -146,7 +146,7 @@ impl Tftpd {
             Some(p) => p,
             None => {
                 let err = format!("Sending {} to {} failed (permission check failed).", filename.display(), cl);
-                self.tftp.send_error(&socket, 2, "Permission denied")?;
+                self.tftp.send_error(socket, 2, "Permission denied")?;
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
             }
         };
@@ -155,25 +155,25 @@ impl Tftpd {
             Ok(f) => f,
             Err(ref error) if error.kind() == io::ErrorKind::NotFound => {
                 let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error.to_string());
-                self.tftp.send_error(&socket, 1, "File not found")?;
+                self.tftp.send_error(socket, 1, "File not found")?;
                 return Err(io::Error::new(io::ErrorKind::NotFound, err));
             }
             Err(error) => {
                 let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error.to_string());
-                self.tftp.send_error(&socket, 2, "Permission denied")?;
+                self.tftp.send_error(socket, 2, "Permission denied")?;
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
             }
         };
         if !file.metadata()?.is_file() {
-            self.tftp.send_error(&socket, 1, "File not found")?;
+            self.tftp.send_error(socket, 1, "File not found")?;
             return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
         }
 
         if let Some(opt) = options.get_mut("tsize") {
             *opt = self.tftp.transfersize(&mut file)?.to_string();
         }
-        self.tftp.ack_options(&socket, &options, true)?;
-        match self.tftp.send_file(&socket, &mut file) {
+        self.tftp.ack_options(socket, &options, true)?;
+        match self.tftp.send_file(socket, &mut file) {
             Ok(_) => Ok(format!("Sent {} to {}.", path.display(), cl)),
             Err(err) => {
                 let error = format!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string());
@@ -198,7 +198,7 @@ impl Tftpd {
                     self.tftp.send_error(&socket, 4, "reading not allowed")?;
                     Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
                 } else {
-                    self.handle_rrq(&socket, &cl, &buf[2..])
+                    self.handle_rrq(&socket, cl, &buf[2..])
                 }
             }
             o if o == rtftp::Opcode::WRQ as u16 => {
@@ -206,7 +206,7 @@ impl Tftpd {
                     self.tftp.send_error(&socket, 4, "writing not allowed")?;
                     Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
                 } else {
-                    self.handle_wrq(&socket, &cl, &buf[2..])
+                    self.handle_wrq(&socket, cl, &buf[2..])
                 }
             }
             o if o == rtftp::Opcode::ERROR as u16 => Ok(format!("Received ERROR from {}", cl)),

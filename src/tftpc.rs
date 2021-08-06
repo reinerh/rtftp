@@ -74,7 +74,7 @@ impl Tftpc {
         let (len, remote) = sock.recv_from(&mut buf).ok()?;
 
         let mut options = self.tftp.parse_options(&buf[2..len]);
-        self.tftp.init_tftp_options(&sock, &mut options).ok()?;
+        self.tftp.init_tftp_options(sock, &mut options).ok()?;
 
         Some(remote)
     }
@@ -144,10 +144,10 @@ impl Tftpc {
         let mut remote = None;
         for _ in 1..3 {
             sock.send_to(&buf, self.conf.remote)?;
-            remote = self.wait_for_option_ack(&sock);
+            remote = self.wait_for_option_ack(sock);
             if remote.is_none() {
                 /* for WRQ either OACK or ACK is replied */
-                remote = self.wait_for_response(&sock, rtftp::Opcode::ACK, 0, None)?;
+                remote = self.wait_for_response(sock, rtftp::Opcode::ACK, 0, None)?;
             }
             if remote.is_some() {
                 break;
@@ -159,11 +159,11 @@ impl Tftpc {
             None => return Err(io::Error::new(io::ErrorKind::TimedOut, "No response from server")),
         }
 
-        match self.tftp.send_file(&sock, &mut file) {
+        match self.tftp.send_file(sock, &mut file) {
             Ok(_) => Ok(format!("Sent {} to {}.", self.conf.filename.display(), self.conf.remote)),
             Err(err) => {
                 let error = format!("Sending {} to {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
-                self.tftp.send_error(&sock, 0, "Sending error")?;
+                self.tftp.send_error(sock, 0, "Sending error")?;
                 Err(io::Error::new(err.kind(), error))
             }
         }
@@ -181,12 +181,12 @@ impl Tftpc {
         let mut remote = None;
         for _ in 1..3 {
             sock.send_to(&buf, self.conf.remote)?;
-            let oack_remote = self.wait_for_option_ack(&sock);
+            let oack_remote = self.wait_for_option_ack(sock);
             if let Some(r) = oack_remote {
                 /* for RRQ the received OACKs need to be acked */
-                self.tftp.send_ack_to(&sock, r, 0)?;
+                self.tftp.send_ack_to(sock, r, 0)?;
             }
-            remote = self.wait_for_response(&sock, rtftp::Opcode::DATA, 1, oack_remote)?;
+            remote = self.wait_for_response(sock, rtftp::Opcode::DATA, 1, oack_remote)?;
             if remote.is_some() {
                 break;
             }
@@ -197,11 +197,11 @@ impl Tftpc {
             None => return Err(io::Error::new(io::ErrorKind::TimedOut, "No response from server")),
         }
 
-        match self.tftp.recv_file(&sock, &mut file) {
+        match self.tftp.recv_file(sock, &mut file) {
             Ok(_) => Ok(format!("Received {} from {}.", self.conf.filename.display(), self.conf.remote)),
             Err(err) => {
                 let error = format!("Receiving {} from {} failed ({}).", self.conf.filename.display(), self.conf.remote, err);
-                self.tftp.send_error(&sock, 0, "Receiving error")?;
+                self.tftp.send_error(sock, 0, "Receiving error")?;
                 Err(std::io::Error::new(err.kind(), error))
             }
         }
