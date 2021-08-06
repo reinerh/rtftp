@@ -4,6 +4,8 @@ RusTFTP
 A client and server implementation of the Trivial File Transfer Protocol,
 written in Rust.
 
+[![Crates.io](https://img.shields.io/crates/v/rtftp.svg)](https://crates.io/crates/rtftp)
+
 
 Currently supported:
 * RFC 1350 (TFTP revision 2)
