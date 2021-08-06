@@ -28,3 +28,5 @@ jobs:
     - uses: actions/checkout@v2
     - name: Install dependencies
       run: sudo apt-get install atftp atftpd busybox curl tftp
+    - name: Run tests
+      run: ./test.sh
