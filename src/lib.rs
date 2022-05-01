@@ -352,6 +352,7 @@ impl Tftp {
         let mut options = HashMap::new();
 
         let mut pos = 0;
+        #[allow(clippy::while_let_loop)]
         loop {
             let key = match self.get_tftp_str(&buf[pos..]) {
                 Some(k) => k,

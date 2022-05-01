@@ -15,6 +15,7 @@ use getopts::Options;
 
 extern crate rtftp;
 
+#[allow(clippy::upper_case_acronyms)]
 enum Operation {
     RRQ,
     WRQ,

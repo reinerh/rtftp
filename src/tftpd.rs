@@ -154,12 +154,12 @@ impl Tftpd {
         let mut file = match File::open(&path) {
             Ok(f) => f,
             Err(ref error) if error.kind() == io::ErrorKind::NotFound => {
-                let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error.to_string());
+                let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error);
                 self.tftp.send_error(socket, 1, "File not found")?;
                 return Err(io::Error::new(io::ErrorKind::NotFound, err));
             }
             Err(error) => {
-                let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error.to_string());
+                let err = format!("Sending {} to {} failed ({}).", path.display(), cl, error);
                 self.tftp.send_error(socket, 2, "Permission denied")?;
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, err));
             }
@@ -176,7 +176,7 @@ impl Tftpd {
         match self.tftp.send_file(socket, &mut file) {
             Ok(_) => Ok(format!("Sent {} to {}.", path.display(), cl)),
             Err(err) => {
-                let error = format!("Sending {} to {} failed ({}).", path.display(), cl, err.to_string());
+                let error = format!("Sending {} to {} failed ({}).", path.display(), cl, err);
                 Err(std::io::Error::new(err.kind(), error))
             }
         }
