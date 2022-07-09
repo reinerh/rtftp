@@ -29,9 +29,10 @@ pub enum Opcode {
     OACK  = 0x06,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(u8)]
 pub enum Mode {
+    #[default]
     OCTET,
     NETASCII,
 }
@@ -43,19 +44,21 @@ pub struct TftpOptions {
     tsize: u64,
 }
 
-#[derive(Clone, Copy)]
+impl Default for TftpOptions {
+    fn default() -> Self {
+        TftpOptions {
+            blksize: 512,
+            timeout: Duration::from_secs(3),
+            tsize: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
 pub struct Tftp {
     options: TftpOptions,
     mode: Mode,
     progress_cb: Option<ProgressCallback>,
-}
-
-fn default_options() -> TftpOptions {
-    TftpOptions {
-        blksize: 512,
-        timeout: Duration::from_secs(3),
-        tsize: 0,
-    }
 }
 
 fn netascii_to_octet(buf: &[u8], previous_cr: bool) -> (Vec<u8>, bool) {
@@ -97,16 +100,6 @@ fn blksize2(size: usize) -> usize {
     (size + 1).next_power_of_two() >> 1
 }
 
-
-impl Default for Tftp {
-    fn default() -> Tftp {
-        Tftp {
-            options: default_options(),
-            mode: Mode::OCTET,
-            progress_cb: None,
-        }
-    }
-}
 
 impl Tftp {
     pub fn new() -> Tftp {
@@ -298,7 +291,7 @@ impl Tftp {
     }
 
     pub fn init_tftp_options(&mut self, sock: &UdpSocket, options: &mut HashMap<String, String>) -> Result<(), io::Error> {
-        self.options = default_options();
+        self.options = Default::default();
 
         options.retain(|key, val| {
             let val = val.to_lowercase();
