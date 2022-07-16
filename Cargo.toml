@@ -2,7 +2,7 @@
 name = "rtftp"
 version = "1.1.2"
 authors = ["Reiner Herrmann <reiner@reiner-h.de>"]
-edition = "2018"
+edition = "2021"
 license = "GPL-3.0-or-later"
 description = "client and server implementation of the Trivial File Transfer Protocol"
 repository = "https://github.com/reinerh/rtftp/"
