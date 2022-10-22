@@ -15,7 +15,7 @@ lto = true
 panic = 'abort'
 
 [dependencies]
-nix = "0.22.0"
+nix = { version = "0.25.0", default-features = false, features = ["fs", "user"] }
 getopts = "0.2"
 threadpool = "1.0"
 
