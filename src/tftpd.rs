@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2020 Reiner Herrmann <reiner@reiner-h.de>
+ * Copyright 2019-2022 Reiner Herrmann <reiner@reiner-h.de>
  * License: GPL-3+
  */
 
@@ -15,6 +15,12 @@ use std::time::Duration;
 use nix::unistd::{chroot, setresgid, setresuid, Gid, Uid, ROOT};
 use getopts::Options;
 use threadpool::ThreadPool;
+
+#[cfg(feature = "landlock")]
+use landlock::{
+    Access, AccessFs, PathBeneath, PathFd, RestrictionStatus,
+    RulesetError, RulesetStatus, ABI
+};
 
 #[derive(Clone)]
 struct Configuration {
@@ -252,6 +258,37 @@ impl Tftpd {
         }
     }
 
+    #[cfg(feature = "landlock")]
+    fn restrict_filesystem(&self) {
+        let abi = ABI::V1;
+        let access_all = AccessFs::from_all(abi);
+        let access_read = AccessFs::from_read(abi);
+        let access_write = AccessFs::from_write(abi);
+
+        let pathfd = PathFd::new(&self.conf.dir).expect("Directory can't be opened");
+
+        let access = if self.conf.ro {
+            access_read
+        } else if self.conf.wo {
+            access_write
+        } else {
+            access_all
+        };
+
+        let restrict = || -> Result<RestrictionStatus, RulesetError> {
+            landlock::Ruleset::new()
+                    .handle_access(access_all)?
+                    .create()?
+                    .add_rule(PathBeneath::new(pathfd, access))?
+                    .restrict_self()
+        };
+
+        let status = restrict().expect("Setting up landlock restriction failed");
+        if status.ruleset != RulesetStatus::FullyEnforced {
+            eprintln!("Landlock restrictions not (fully) applied (maybe kernel too old?).");
+        }
+    }
+
     pub fn start(&mut self) {
         let socket = match UdpSocket::bind(format!("[::]:{}", self.conf.port)) {
             Ok(s) => s,
@@ -260,6 +297,10 @@ impl Tftpd {
                 return;
             }
         };
+
+        #[cfg(feature = "landlock")]
+        self.restrict_filesystem();
+
         match self.chroot_destdir() {
             Ok(_) => {},
             Err(err) => {

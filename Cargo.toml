@@ -18,6 +18,11 @@ panic = 'abort'
 nix = { version = "0.25.0", default-features = false, features = ["fs", "user"] }
 getopts = "0.2"
 threadpool = "1.0"
+landlock = { git = "https://github.com/landlock-lsm/rust-landlock.git", optional = true }
+
+[features]
+default = ["landlock"]
+landlock = ["dep:landlock"]
 
 [[bin]]
 name = "rtftpd"
