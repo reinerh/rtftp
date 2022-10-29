@@ -12,16 +12,9 @@ use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-extern crate nix;
 use nix::unistd::{chroot, setresgid, setresuid, Gid, Uid, ROOT};
-
-extern crate getopts;
 use getopts::Options;
-
-extern crate threadpool;
 use threadpool::ThreadPool;
-
-extern crate rtftp;
 
 #[derive(Clone)]
 struct Configuration {

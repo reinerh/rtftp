@@ -10,10 +10,7 @@ use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-extern crate getopts;
 use getopts::Options;
-
-extern crate rtftp;
 
 #[allow(clippy::upper_case_acronyms)]
 enum Operation {
