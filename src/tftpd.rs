@@ -18,8 +18,8 @@ use threadpool::ThreadPool;
 
 #[cfg(feature = "landlock")]
 use landlock::{
-    Access, AccessFs, PathBeneath, PathFd, RestrictionStatus,
-    RulesetError, RulesetStatus, ABI
+    Access, AccessFs, PathBeneath, PathFd, RestrictionStatus, RulesetAttr,
+    RulesetCreatedAttr, RulesetError, RulesetStatus, ABI
 };
 
 #[derive(Clone)]
