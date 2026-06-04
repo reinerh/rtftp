@@ -16,6 +16,7 @@ pub static VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 /// * `cur` - current number of bytes
 /// * `total` - total number of bytes; 0 if unknown
 /// * `state` - state that was returned in previous call
+///
 /// Returns state that should get passed in next invocation
 type ProgressCallback = fn(cur: u64, total: u64, state: u64) -> u64;
 
@@ -516,7 +517,7 @@ impl Tftp {
             match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
                 opc if opc == Opcode::DATA as u16 => (),
                 opc if opc == Opcode::ERROR as u16 => return Err(self.parse_error(&buf[..len])),
-                _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode")),
+                _ => return Err(io::Error::other("unexpected opcode")),
             };
             if u16::from_be_bytes([buf[2], buf[3]]) != block_nr {
                 /* already received or packets were missed, re-acknowledge */
@@ -550,7 +551,7 @@ impl Tftp {
 
         if netascii_state {
             /* the file ended with an incomplete \r encoding */
-            file.write_all(&[b'\r'])?;
+            file.write_all(b"\r")?;
         }
 
         file.flush()?;

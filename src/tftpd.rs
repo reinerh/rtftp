@@ -62,7 +62,7 @@ impl Tftpd {
     }
 
     fn file_allowed(&self, filename: &Path) -> Option<PathBuf> {
-        if self.conf.dir == PathBuf::from("/") {
+        if self.conf.dir == *"/" {
             /* running either chrooted in requested directory,
                or whole root is being served */
             return Some(filename.to_path_buf());
@@ -90,7 +90,7 @@ impl Tftpd {
             "netascii" => self.tftp.set_mode(rtftp::Mode::NETASCII),
             _ => {
                 self.tftp.send_error(socket, 0, "Unsupported mode")?;
-                return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
+                return Err(io::Error::other("unsupported mode"));
             }
         }
 
@@ -137,7 +137,7 @@ impl Tftpd {
             "netascii" => self.tftp.set_mode(rtftp::Mode::NETASCII),
             _ => {
                 self.tftp.send_error(socket, 0, "Unsupported mode")?;
-                return Err(io::Error::new(io::ErrorKind::Other, "unsupported mode"));
+                return Err(io::Error::other("unsupported mode"));
             }
         }
 
@@ -188,14 +188,14 @@ impl Tftpd {
 
         if buf.len() < 2 {
             self.tftp.send_error(&socket, 0, "Invalid request length")?;
-            return Err(io::Error::new(io::ErrorKind::Other, "invalid request length"));
+            return Err(io::Error::other("invalid request length"));
         }
 
         match u16::from_be_bytes([buf[0], buf[1]]) {  // opcode
             o if o == rtftp::Opcode::RRQ as u16 => {
                 if self.conf.wo {
                     self.tftp.send_error(&socket, 4, "reading not allowed")?;
-                    Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
+                    Err(io::Error::other("unallowed mode"))
                 } else {
                     self.handle_rrq(&socket, cl, &buf[2..])
                 }
@@ -203,7 +203,7 @@ impl Tftpd {
             o if o == rtftp::Opcode::WRQ as u16 => {
                 if self.conf.ro {
                     self.tftp.send_error(&socket, 4, "writing not allowed")?;
-                    Err(io::Error::new(io::ErrorKind::Other, "unallowed mode"))
+                    Err(io::Error::other("unallowed mode"))
                 } else {
                     self.handle_wrq(&socket, cl, &buf[2..])
                 }
@@ -211,7 +211,7 @@ impl Tftpd {
             o if o == rtftp::Opcode::ERROR as u16 => Ok(format!("Received ERROR from {}", cl)),
             _ => {
                 self.tftp.send_error(&socket, 4, "Unexpected opcode")?;
-                Err(io::Error::new(io::ErrorKind::Other, "unexpected opcode"))
+                Err(io::Error::other("unexpected opcode"))
             }
         }
     }
@@ -252,7 +252,7 @@ impl Tftpd {
                 self.conf.dir = PathBuf::from("/");
                 Ok(())
             },
-            Err(err) if err == nix::errno::Errno::EPERM => Ok(()),
+            Err(nix::errno::Errno::EPERM) => Ok(()),
             Err(err) if Uid::effective() == ROOT => Err(err),
             Err(_) => Ok(()),
         }
