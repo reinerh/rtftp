@@ -276,7 +276,7 @@ impl Tftpd {
         };
 
         let restrict = || -> Result<RestrictionStatus, RulesetError> {
-            landlock::Ruleset::new()
+            landlock::Ruleset::default()
                     .handle_access(access_all)?
                     .create()?
                     .add_rule(PathBeneath::new(pathfd, access))?
