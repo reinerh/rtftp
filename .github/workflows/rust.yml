@@ -27,6 +27,6 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Install dependencies
-      run: sudo apt-get install atftp atftpd busybox curl tftp
+      run: sudo apt-get install atftp atftpd busybox curl
     - name: Run tests
       run: ./test.sh
